@@ -157,6 +157,10 @@ systemctl list-timers 'sf-extractor@*'           # next scheduled run
 
 Failures are written to `notifications.log_file` and (if configured) a Discord webhook.
 
+## License
+
+MIT - see [`LICENSE`](LICENSE.md). Copyright (c) 2026 greeny.
+
 ## Credits
 
 Built on [CUE4Parse](https://github.com/FabianFG/CUE4Parse),

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0e76c613bcf96e8464fdaabaafc1d59e",
+    "content-hash": "896dea5d0941b82f535665617e3669e9",
     "packages": [
         {
             "name": "nette/tokenizer",
@@ -209,16 +209,16 @@
         },
         {
             "name": "satisfactory-tools/docs-parser",
-            "version": "v1.0.1",
+            "version": "v1.0.2",
             "source": {
                 "type": "git",
-                "url": "https://github.com/SatisfactoryTools/DataUtils.git",
-                "reference": "63309bb2d8a155fd2cea03f113f1db04520d7070"
+                "url": "https://github.com/SatisfactoryTools/DocsParser.git",
+                "reference": "f7fef8cbdd8fa9c8eb17be0148f2df88ca66c063"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/SatisfactoryTools/DataUtils/zipball/63309bb2d8a155fd2cea03f113f1db04520d7070",
-                "reference": "63309bb2d8a155fd2cea03f113f1db04520d7070",
+                "url": "https://api.github.com/repos/SatisfactoryTools/DocsParser/zipball/f7fef8cbdd8fa9c8eb17be0148f2df88ca66c063",
+                "reference": "f7fef8cbdd8fa9c8eb17be0148f2df88ca66c063",
                 "shasum": ""
             },
             "require": {
@@ -254,10 +254,10 @@
             ],
             "description": "Parser for Satisfactory documentation files.",
             "support": {
-                "issues": "https://github.com/SatisfactoryTools/DataUtils/issues",
-                "source": "https://github.com/SatisfactoryTools/DataUtils/tree/v1.0.1"
+                "issues": "https://github.com/SatisfactoryTools/DocsParser/issues",
+                "source": "https://github.com/SatisfactoryTools/DocsParser/tree/v1.0.2"
             },
-            "time": "2026-07-09T22:14:45+00:00"
+            "time": "2026-07-10T09:53:14+00:00"
         },
         {
             "name": "symfony/console",

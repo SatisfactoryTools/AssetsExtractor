@@ -15,7 +15,7 @@ use Symfony\Component\Process\Process;
  *     + rename), so the API never sees a partial file. The suffix distinguishes
  *     parser variants (e.g. "" for the default, "-ficsmas" for the ficsmas one).
  *  3. runImport(): runs the build-level API import command once, after all variant
- *     files are placed — <command> --buildId <b> --branch <br> [--version <v>].
+ *     files are placed — <command> --buildId <b> --branch <br> [--game-version <v>].
  *
  * The import command is optional (empty = skip) so the file drop can be exercised
  * before the API command exists.
@@ -54,7 +54,8 @@ final class ApiHandoff
 
     /**
      * Run the build-level API import command once (after all variant files are
-     * placed): <command> --buildId <b> --branch <br> [--version <v>].
+     * placed): <command> --buildId <b> --branch <br> [--game-version <v>].
+     * (`--game-version`, not `--version`, to avoid Symfony Console's built-in.)
      * No-op if no command is configured.
      */
     public function runImport(string $branch, string $buildId, ?string $gameVersion = null): void
@@ -64,7 +65,7 @@ final class ApiHandoff
         }
         $cmd = $this->command . ' --buildId ' . escapeshellarg($buildId) . ' --branch ' . escapeshellarg($branch);
         if ($gameVersion !== null && $gameVersion !== '') {
-            $cmd .= ' --version ' . escapeshellarg($gameVersion);
+            $cmd .= ' --game-version ' . escapeshellarg($gameVersion);
         }
         $process = Process::fromShellCommandline($cmd);
         $process->setTimeout(600.0);
