@@ -15,7 +15,7 @@ For each branch (`stable` / `experimental`), once per run:
 2. **Download** - `steamcmd`-update the game client for that branch.
 3. **Version** - read the human game version (e.g. `1.2.3.1`) + engine version from the install.
 4. **Docs diff** - locate the `Docs` file and skip the rest if it hasn't changed.
-5. **Parse** - run the [`satisfactory-tools/docs-parser`](https://github.com/SatisfactoryTools/DataUtils) package (once per variant: default and `-ficsmas`), producing the item / recipe / building / schematic data and the list of referenced icon textures.
+5. **Parse** - run the [`satisfactory-tools/docs-parser`](https://github.com/SatisfactoryTools/DocsParser) package (once per variant: default and `-ficsmas`), producing the item / recipe / building / schematic data and the list of referenced icon textures.
 6. **Extract** - pull those textures out of the UE5 pak files with [CUE4Parse](https://github.com/FabianFG/CUE4Parse) and normalize each to 256×256 and 64×64 PNGs.
 7. **Content-address + dedup** - name each image by a hash of its contents, so identical icons are stored once and unchanged images are never re-uploaded.
 8. **Rewrite + publish** - replace every icon reference in the parsed data with its image id, wrap it as `{ "data": …, "metadata": {} }`, and drop the images + versioned JSON into the API's data directory, then trigger the API import.
@@ -161,5 +161,5 @@ Failures are written to `notifications.log_file` and (if configured) a Discord w
 
 Built on [CUE4Parse](https://github.com/FabianFG/CUE4Parse),
 [SkiaSharp](https://github.com/mono/SkiaSharp), and
-[satisfactory-tools/docs-parser](https://github.com/SatisfactoryTools/DataUtils).
+[satisfactory-tools/docs-parser](https://github.com/SatisfactoryTools/DocsParser).
 Not affiliated with Coffee Stain Studios.
