@@ -1,0 +1,13 @@
+# Hourly schedule for one branch (instance = branch name).
+# Enable stable:  systemctl enable --now sf-extractor@stable.timer
+# (Add experimental later once disk allows: sf-extractor@experimental.timer)
+[Unit]
+Description=Run Satisfactory assets extractor (%i) hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

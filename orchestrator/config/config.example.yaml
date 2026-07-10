@@ -1,0 +1,67 @@
+# Copy to config.yaml and fill in. The orchestrator loads config.yaml by default
+# (override with the EXTRACTOR_CONFIG env var).
+
+steam:
+    app_id: 526870
+    steamcmd: /usr/games/steamcmd
+    # Steam account that OWNS Satisfactory (required for downloads; version checks
+    # work anonymously). Do a one-time interactive `steamcmd +login <username>` so
+    # the session is cached; the password/2FA are never stored here.
+    username: ""
+    # logical branch name  ->  Steam beta key
+    branches:
+        stable: public
+        experimental: experimental
+
+docs:
+    # Single locale used as the parse source (icons are locale-independent).
+    locale: en-US
+
+parser:
+    # Uses the satisfactory-tools/docs-parser composer package directly (Component D).
+    # Each variant is parsed + published separately. `suffix` is appended to the
+    # API filename (<branch>-<build><suffix>.json); `args` are extra parser flags.
+    variants:
+        - { suffix: "",         args: ["--no-ficsmas"] }   # default build (no ficsmas)
+        - { suffix: "-ficsmas", args: [] }                 # with ficsmas (parser defaults)
+
+database:
+    # PDO DSN for MariaDB/MySQL. Create the DB + user first (see README).
+    dsn: "mysql:host=127.0.0.1;port=3306;dbname=sf_extractor;charset=utf8mb4"
+    user: sf_extractor
+    password: "CHANGE_ME"
+
+paths:
+    # Root for locks, logs, downloads, artifacts
+    data: /path/to/data
+
+extraction:
+    # The .NET image extractor. Needs the .NET 10 runtime.
+    # Build it with: dotnet build -c Release  (in extractor-net/)
+    dotnet: dotnet
+    dll: /path/to/assets-extractor/extractor-net/bin/Release/net10.0/Extractor.dll
+    sizes: "256,64"
+    # Ordered auto-detect candidates (first that parses a known asset wins).
+    engine_candidates: [ GAME_UE5_6, GAME_UE5_5, GAME_UE5_4, GAME_UE5_3 ]
+    aes_key: ""   # empty = unencrypted (Satisfactory default)
+
+publish:
+    # API data root (co-located). Content-addressed images land in <api_data_dir>/<images_subdir>/{256,64}/<id>.png
+    # and the client json in <api_data_dir>/<versions_subdir>/<branch>-<build>.json
+    api_data_dir: /path/to/tools-api/www/data
+    images_subdir: images
+    versions_subdir: versions
+    id_length: 16
+    # API import command (invoked as: <command> --buildId <build> --branch <branch>). Empty = skip.
+    command: ""
+
+notifications:
+    log_file: /path/to/assets-extractor/data/logs/notifications.log
+    discord:
+        webhook_url: ""     # create a Discord webhook and paste its URL here
+        mention: ""         # optional, e.g. "<@your-user-id>" to get pinged on failures
+
+guards:
+    min_free_gb: 40         # abort before a FRESH (~30 GB) download if free space is below this
+    min_free_gb_update: 10  # lower bar when the install already exists (delta/validate)
+    max_fail_ratio: 0.10    # warn if more than this fraction of image assets fail

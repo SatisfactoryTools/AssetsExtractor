@@ -1,0 +1,23 @@
+# Satisfactory assets extractor — per-branch oneshot (instance = branch name).
+#
+# TEMPLATE — edit the three CHANGE_ME lines below to match your install, then:
+#   sudo cp systemd/sf-extractor@.service systemd/sf-extractor@.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sf-extractor@stable.timer   # or: start ...@stable.service
+#
+# What to set:
+#   - User=             the account that owns the cached steamcmd session + .NET runtime
+#   - WorkingDirectory= absolute path to <repo>/orchestrator
+#   - ExecStart=        the php binary path if it isn't /usr/bin/php
+[Unit]
+Description=Satisfactory assets extractor (%i branch)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=CHANGE_ME
+WorkingDirectory=/path/to/assets-extractor/orchestrator
+ExecStart=/usr/bin/php bin/extractor run --branch=%i
+Nice=10
+# The app writes its own failure notifications; journald captures hard crashes.
