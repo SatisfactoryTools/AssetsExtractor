@@ -52,7 +52,9 @@ publish:
     images_subdir: images
     versions_subdir: versions
     id_length: 16
-    # API import command (invoked as: <command> --buildId <build> --branch <branch>). Empty = skip.
+    # API import command (invoked as: <command> --buildId <build> --branch <branch> [--game-version <v>]
+    # --summary-file <file>). It decides whether the build joins the current SFTools version (only
+    # cosmetic changes) or starts a new one; the decision is included in notifications. Empty = skip.
     command: ""
 
 notifications:

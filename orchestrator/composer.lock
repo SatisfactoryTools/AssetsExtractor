@@ -209,16 +209,16 @@
         },
         {
             "name": "satisfactory-tools/docs-parser",
-            "version": "v1.0.2",
+            "version": "v1.0.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/SatisfactoryTools/DocsParser.git",
-                "reference": "f7fef8cbdd8fa9c8eb17be0148f2df88ca66c063"
+                "reference": "937a2c99534e193986ae7dbbbd193e8b956d18e8"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/SatisfactoryTools/DocsParser/zipball/f7fef8cbdd8fa9c8eb17be0148f2df88ca66c063",
-                "reference": "f7fef8cbdd8fa9c8eb17be0148f2df88ca66c063",
+                "url": "https://api.github.com/repos/SatisfactoryTools/DocsParser/zipball/937a2c99534e193986ae7dbbbd193e8b956d18e8",
+                "reference": "937a2c99534e193986ae7dbbbd193e8b956d18e8",
                 "shasum": ""
             },
             "require": {
@@ -255,9 +255,9 @@
             "description": "Parser for Satisfactory documentation files.",
             "support": {
                 "issues": "https://github.com/SatisfactoryTools/DocsParser/issues",
-                "source": "https://github.com/SatisfactoryTools/DocsParser/tree/v1.0.2"
+                "source": "https://github.com/SatisfactoryTools/DocsParser/tree/v1.0.3"
             },
-            "time": "2026-07-10T09:53:14+00:00"
+            "time": "2026-10-19T12:10:08+00:00"
         },
         {
             "name": "symfony/console",

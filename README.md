@@ -18,7 +18,7 @@ For each branch (`stable` / `experimental`), once per run:
 5. **Parse** - run the [`satisfactory-tools/docs-parser`](https://github.com/SatisfactoryTools/DocsParser) package (once per variant: default and `-ficsmas`), producing the item / recipe / building / schematic data and the list of referenced icon textures.
 6. **Extract** - pull those textures out of the UE5 pak files with [CUE4Parse](https://github.com/FabianFG/CUE4Parse) and normalize each to 256×256 and 64×64 PNGs.
 7. **Content-address + dedup** - name each image by a hash of its contents, so identical icons are stored once and unchanged images are never re-uploaded.
-8. **Rewrite + publish** - replace every icon reference in the parsed data with its image id, wrap it as `{ "data": …, "metadata": {} }`, and drop the images + versioned JSON into the API's data directory, then trigger the API import.
+8. **Rewrite + publish** - replace every icon reference in the parsed data with its image id, wrap it as `{ "data": …, "metadata": {} }`, and drop the images + versioned JSON into the API's data directory, then trigger the API import. The API decides whether the build joins the current SFTools version (only cosmetic changes such as icons, names or descriptions - plans keep working) or starts a new one (anything the planner uses changed). That decision, the planner changes behind it and the command to override it end up in the notification.
 
 State (per-branch build id / docs hash, published image ids, run history) lives in MariaDB. Runs are locked per-branch, guarded for disk space and extraction failures, and report success/failure to a log file and (optionally) Discord.
 

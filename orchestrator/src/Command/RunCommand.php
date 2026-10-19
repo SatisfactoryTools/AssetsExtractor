@@ -299,17 +299,24 @@ final class RunCommand extends Command
             }
 
             // One build-level API import after all variant files exist.
-            $handoff->runImport($branch, $currentBuild, $gameVersion);
+            $summaryFile = $this->config->dataPath('artifacts', $branch, $currentBuild, 'publish-summary.json');
+            $publishSummary = $handoff->runImport($branch, $currentBuild, $gameVersion, $summaryFile);
+            $versionLines = $publishSummary?->detailLines($handoff->importCommand($branch, $currentBuild, $gameVersion)) ?? [];
+            foreach ($versionLines as $line) {
+                $io->text($line);
+            }
 
             $store->setBuildId($branch, $currentBuild);
             $store->setDocsHash($branch, $docsHash);
-            $store->finishRun($runId, 'completed', sprintf('%s: %d icons (%d new); variants: %s',
-                $gameVersion ?? $currentBuild, $pub['unique'], $pub['new'], implode(', ', $summaries)));
+            $store->finishRun($runId, 'completed', sprintf('%s: %d icons (%d new); variants: %s%s',
+                $gameVersion ?? $currentBuild, $pub['unique'], $pub['new'], implode(', ', $summaries),
+                $publishSummary !== null ? '; versions: ' . implode('; ', $publishSummary->shortLines()) : ''));
             $io->success("Build {$currentBuild} for {$branch} complete.");
             $notifier->success(
                 sprintf('Extractor: %s updated to %s (build %s)',
                     $branch, $gameVersion ?? '(unknown version)', $currentBuild),
-                sprintf('%d icons (%d new). Variants: %s.', $pub['unique'], $pub['new'], implode(', ', $summaries)),
+                sprintf('%d icons (%d new). Variants: %s.', $pub['unique'], $pub['new'], implode(', ', $summaries))
+                . ($versionLines !== [] ? "\n" . implode("\n", $versionLines) : ''),
             );
 
             return Command::SUCCESS;

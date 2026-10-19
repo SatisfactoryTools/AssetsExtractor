@@ -15,7 +15,10 @@ use Symfony\Component\Process\Process;
  *     + rename), so the API never sees a partial file. The suffix distinguishes
  *     parser variants (e.g. "" for the default, "-ficsmas" for the ficsmas one).
  *  3. runImport(): runs the build-level API import command once, after all variant
- *     files are placed — <command> --buildId <b> --branch <br> [--game-version <v>].
+ *     files are placed — <command> --buildId <b> --branch <br> [--game-version <v>]
+ *     --summary-file <f>. The API decides per variant whether the build joins an
+ *     existing SFTools version (only cosmetic changes) or starts a new one, and
+ *     reports that back through the summary file.
  *
  * The import command is optional (empty = skip) so the file drop can be exercised
  * before the API command exists.
@@ -54,19 +57,16 @@ final class ApiHandoff
 
     /**
      * Run the build-level API import command once (after all variant files are
-     * placed): <command> --buildId <b> --branch <br> [--game-version <v>].
-     * (`--game-version`, not `--version`, to avoid Symfony Console's built-in.)
-     * No-op if no command is configured.
+     * placed). Returns what the API decided per variant, or null when no command
+     * is configured or it wrote no summary.
      */
-    public function runImport(string $branch, string $buildId, ?string $gameVersion = null): void
+    public function runImport(string $branch, string $buildId, ?string $gameVersion, string $summaryFile): ?PublishSummary
     {
         if ($this->command === '') {
-            return;
+            return null;
         }
-        $cmd = $this->command . ' --buildId ' . escapeshellarg($buildId) . ' --branch ' . escapeshellarg($branch);
-        if ($gameVersion !== null && $gameVersion !== '') {
-            $cmd .= ' --game-version ' . escapeshellarg($gameVersion);
-        }
+        @unlink($summaryFile);
+        $cmd = $this->importCommand($branch, $buildId, $gameVersion) . ' --summary-file ' . escapeshellarg($summaryFile);
         $process = Process::fromShellCommandline($cmd);
         $process->setTimeout(600.0);
         $process->run();
@@ -76,5 +76,25 @@ final class ApiHandoff
                 . substr($process->getErrorOutput() . $process->getOutput(), -1000)
             );
         }
+
+        return PublishSummary::read($summaryFile);
+    }
+
+    /**
+     * <command> --buildId <b> --branch <br> [--game-version <v>] — also used to
+     * print override hints (append --attach=<slug> / --new-version).
+     * (`--game-version`, not `--version`, to avoid Symfony Console's built-in.)
+     */
+    public function importCommand(string $branch, string $buildId, ?string $gameVersion): string
+    {
+        if ($this->command === '') {
+            return '';
+        }
+        $cmd = $this->command . ' --buildId ' . escapeshellarg($buildId) . ' --branch ' . escapeshellarg($branch);
+        if ($gameVersion !== null && $gameVersion !== '') {
+            $cmd .= ' --game-version ' . escapeshellarg($gameVersion);
+        }
+
+        return $cmd;
     }
 }
