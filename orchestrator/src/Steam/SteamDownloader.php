@@ -46,6 +46,7 @@ final class SteamDownloader
 
         $args = [
             $this->steamcmdPath,
+            '+@sSteamCmdForcePlatformType', 'windows',
             '+force_install_dir', $installDir,
             '+login', $this->username,
             '+app_update', (string) $this->appId,
@@ -70,7 +71,7 @@ final class SteamDownloader
             }
         });
 
-        // Authoritative check: StateFlags == 4 (StateFullyInstalled).
+        // Authoritative check: StateFlags has StateFullyInstalled and the game actually has files.
         $installed = $this->isFullyInstalled($installDir);
 
         if (!$installed) {
@@ -81,7 +82,7 @@ final class SteamDownloader
             }
             throw new \RuntimeException(
                 "steamcmd app_update did not fully install branch '{$betaKey}' "
-                . "(exit {$process->getExitCode()}, StateFlags != 4).{$hint}\n" . $tail
+                . "(exit {$process->getExitCode()}, StateFlags without 4 or SizeOnDisk 0).{$hint}\n" . $tail
             );
         }
 
@@ -90,7 +91,8 @@ final class SteamDownloader
 
     /**
      * Reads <installDir>/steamapps/appmanifest_<appId>.acf and returns true if
-     * StateFlags indicates "fully installed" (bit 0x4).
+     * StateFlags indicates "fully installed" (bit 0x4) and SizeOnDisk is non-zero:
+     * a Proton-routed install reports StateFlags 4 with nothing downloaded.
      */
     public function isFullyInstalled(string $installDir): bool
     {
@@ -103,6 +105,10 @@ final class SteamDownloader
             return false;
         }
 
-        return ((int) $m[1] & 0x4) === 0x4;
+        if (((int) $m[1] & 0x4) !== 0x4) {
+            return false;
+        }
+
+        return preg_match('/"SizeOnDisk"\s+"(\d+)"/', $content, $size) === 1 && (int) $size[1] > 0;
     }
 }
