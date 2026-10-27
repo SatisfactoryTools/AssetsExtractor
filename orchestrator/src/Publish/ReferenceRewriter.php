@@ -17,9 +17,10 @@ final class ReferenceRewriter
 
     /**
      * @param array<string,string> $idMap assetPath => id
+     * @param array<string,mixed> $metadata references the API keeps when it stamps the file (world, map)
      * @return array{rewritten:int,unresolved:int}
      */
-    public function rewrite(string $rawExportPath, array $idMap, string $outPath): array
+    public function rewrite(string $rawExportPath, array $idMap, string $outPath, array $metadata = []): array
     {
         $this->rewritten = 0;
         $this->unresolved = 0;
@@ -28,8 +29,8 @@ final class ReferenceRewriter
         $this->walk($data, $idMap);
 
         // Client envelope: parsed data under "data", plus a "metadata" object the
-        // API fills in later (empty for now).
-        $output = ['data' => $data, 'metadata' => new \stdClass()];
+        // API completes when it imports the build.
+        $output = ['data' => $data, 'metadata' => $metadata === [] ? new \stdClass() : $metadata];
 
         $dir = \dirname($outPath);
         if (!is_dir($dir) && !mkdir($dir, 0o775, true) && !is_dir($dir)) {

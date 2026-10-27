@@ -40,6 +40,9 @@ extraction:
     # Build it with: dotnet build -c Release  (in extractor-net/)
     dotnet: dotnet
     dll: /path/to/assets-extractor/extractor-net/bin/Release/net10.0/Extractor.dll
+    # The .NET world extractor (world-extractor-net): resource nodes, collectibles and the
+    # map tiles. Optional - when missing or failing, a build is published without a map.
+    world_dll: /path/to/assets-extractor/world-extractor-net/bin/Release/net10.0/WorldExtractor.dll
     sizes: "256,64"
     # Ordered auto-detect candidates (first that parses a known asset wins).
     engine_candidates: [ GAME_UE5_6, GAME_UE5_5, GAME_UE5_4, GAME_UE5_3 ]
@@ -51,6 +54,14 @@ publish:
     api_data_dir: /path/to/tools-api/www/data
     images_subdir: images
     versions_subdir: versions
+    # World extraction output, content-addressed and shared across builds:
+    # <api_data_dir>/<maps_subdir>/<mapId>/ (map.json + tiles) and
+    # <api_data_dir>/<world_subdir>/{source,collectibles}-<hash>.json.
+    maps_subdir: maps
+    world_subdir: world
+    # How the API's www dir reaches api_data_dir; the world references stamped into
+    # data files are relative to the www dir, like a version's dataPath.
+    data_path_prefix: data
     id_length: 16
     # API import command (invoked as: <command> --buildId <build> --branch <branch> [--game-version <v>]
     # --summary-file <file>). It decides whether the build joins the current SFTools version (only

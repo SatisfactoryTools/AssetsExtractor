@@ -39,6 +39,7 @@ The heavy lifting that *must* be .NET (CUE4Parse) is isolated in `extractor-net/
 ```
 orchestrator/     PHP orchestrator (bin/extractor, src/, config/)
 extractor-net/    .NET image extractor (Program.cs, Extractor.csproj)
+world-extractor-net/  .NET world extractor: resource nodes, collectibles, map tiles
 systemd/          systemd units
 data/             runtime working dir (git-ignored): downloads, artifacts, images
 ```
@@ -63,6 +64,9 @@ cd orchestrator && composer install && cd ..
 
 # .NET image extractor
 cd extractor-net && dotnet build -c Release && cd ..
+
+# .NET world extractor (resource nodes, collectibles, map tiles)
+cd world-extractor-net && dotnet build -c Release && cd ..
 ```
 
 **2. Create the database + user** (MariaDB/MySQL)
@@ -142,7 +146,15 @@ php orchestrator/bin/extractor run --branch=stable          # run one branch
 php orchestrator/bin/extractor run --branch=all             # both branches (default)
 php orchestrator/bin/extractor run --branch=stable --force  # ignore the "unchanged" check
 php orchestrator/bin/extractor db:migrate                   # create/verify state tables
+php orchestrator/bin/extractor world --branch=stable        # re-extract + publish the world/map of an install
 ```
+
+`run` extracts the world (resource nodes with locations, collectibles, map tiles) of every new
+build and publishes it content-addressed into the API data dir (`maps/<id>/`,
+`world/{source,collectibles}-<hash>.json`); the references go into each variant's
+`metadata`, which the API's `publish` keeps. A failed world extraction only warns - the
+build is published without a map. `world` does the same for an install that is already
+published and prints the API command (`world:attach`) that stamps it into existing versions.
 
 `check` needs no Steam credentials and works even before the DB exists (it just
 skips the comparison). `run` requires the DB.

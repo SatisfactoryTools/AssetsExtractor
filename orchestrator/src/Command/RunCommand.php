@@ -18,6 +18,7 @@ use App\State\StateStore;
 use App\Steam\SteamClient;
 use App\Steam\SteamDownloader;
 use App\Support\RunLock;
+use App\World\WorldPipeline;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -27,8 +28,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Orchestrator entrypoint. Per branch, under a lock: check build id -> download ->
- * docs-diff -> parse -> extract images -> content-address/dedup -> rewrite refs ->
- * hand off to the API, committing state only after success.
+ * docs-diff -> parse -> extract images -> content-address/dedup -> extract world
+ * (nodes, collectibles, map) -> rewrite refs -> hand off to the API, committing
+ * state only after success.
  */
 #[AsCommand(name: 'run', description: 'Run the extraction pipeline for a branch')]
 final class RunCommand extends Command
@@ -103,6 +105,7 @@ final class RunCommand extends Command
             (string) $this->config->get('extraction.aes_key', ''),
         );
         $publisher = new Publisher($store, (int) $this->config->get('publish.id_length', 16));
+        $world = WorldPipeline::fromConfig($this->config);
         $rewriter = new ReferenceRewriter();
         $handoff = new ApiHandoff(
             (string) $this->config->require('publish.api_data_dir'),
@@ -113,7 +116,7 @@ final class RunCommand extends Command
         $exit = Command::SUCCESS;
         foreach ($branches as $branch) {
             $exit = max($exit, $this->runBranch(
-                $io, $store, $notifier, $downloader, $docs, $parser, $extractor, $publisher, $rewriter, $handoff,
+                $io, $store, $notifier, $downloader, $docs, $parser, $extractor, $publisher, $world, $rewriter, $handoff,
                 $branch, $configured[$branch], $current[$branch] ?? null, $force,
             ));
         }
@@ -130,6 +133,7 @@ final class RunCommand extends Command
         DocsParser $parser,
         ImageExtractor $extractor,
         Publisher $publisher,
+        WorldPipeline $world,
         ReferenceRewriter $rewriter,
         ApiHandoff $handoff,
         string $branch,
@@ -283,12 +287,25 @@ final class RunCommand extends Command
             $io->success(sprintf('Images: %d unique, %d new, %d file(s) copied → %s',
                 $pub['unique'], $pub['new'], $pub['copied'], $imagesOut));
 
+            // World: nodes, collectibles and map. Optional for the build - a failure only
+            // means this build's versions get no map and keep the API's default world.
+            $worldMetadata = [];
+            try {
+                $worldDir = $this->config->dataPath('artifacts', $branch, $currentBuild, 'world');
+                $worldMetadata = $world->run($installDir, $worldDir, $gameVersion, $onProgress, $engineCandidates);
+                $io->success(sprintf('World: map %s, %s, %s', $worldMetadata['map'],
+                    basename($worldMetadata['worldSource']), basename($worldMetadata['collectibles'])));
+            } catch (\Throwable $e) {
+                $io->warning('World extraction failed: ' . $e->getMessage());
+                $notifier->warning("Extractor: world extraction failed ({$branch} {$currentBuild})", $e->getMessage());
+            }
+
             // G: rewrite each variant's icon refs with the shared id map, then place it.
             $summaries = [];
             foreach ($variantData as $vd) {
                 $publishDir = $this->config->dataPath('artifacts', $branch, $currentBuild, 'publish', $vd['label']);
                 $dataJson = $publishDir . '/data.json';
-                $rw = $rewriter->rewrite($vd['rawExport'], $pub['idMap'], $dataJson);
+                $rw = $rewriter->rewrite($vd['rawExport'], $pub['idMap'], $dataJson, $worldMetadata);
                 if ($rw['unresolved'] > 0) {
                     $io->warning(sprintf("Variant '%s': %d icon ref(s) had no image (left null).", $vd['label'], $rw['unresolved']));
                 }
