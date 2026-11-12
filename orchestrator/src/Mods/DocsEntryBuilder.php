@@ -49,6 +49,8 @@ final class DocsEntryBuilder
     /**
      * @param array<string,string> $classMap class name => /Script/FactoryGame.<native class>
      */
+    private const TEXT_KEYS = ['mDisplayName', 'mDescription', 'mAbbreviatedDisplayName', 'mSmallIcon', 'mPersistentBigIcon'];
+
     public function __construct(
         private readonly DocsFile $docs,
         private readonly NativeDefaults $defaults,
@@ -189,12 +191,56 @@ final class DocsEntryBuilder
             $report->count($resolved['native']);
         }
 
+        $entries = $this->asciiSafe($entries, $report);
+
         if ($unnamed !== []) {
             $report->note(sprintf('%d schematic(s) have no name (%s); they are named after their class. Mods often grant such schematics in code, depending on settings, so their recipes may not all be available together in the game',
                 \count($unnamed), implode(', ', $unnamed)));
         }
 
         return ['entries' => $entries, 'report' => $report];
+    }
+
+    /**
+     * DocsParser's tokenizer only takes ASCII in class paths, so a class like "Recipe_Foo™_C" fails the whole parse.
+     * The same conversion runs on names and on every reference, which keeps them matching.
+     * @param list<array{native:string,entry:array<string,mixed>}> $entries
+     * @return list<array{native:string,entry:array<string,mixed>}>
+     */
+    private function asciiSafe(array $entries, ModReport $report): array
+    {
+        $renamed = [];
+        foreach ($entries as &$item) {
+            array_walk_recursive($item['entry'], static function (mixed &$value, string|int $key) use (&$renamed): void {
+                // Item icons are read as plain strings and must keep the real path for the image extractor.
+                if (!\is_string($value) || \in_array($key, self::TEXT_KEYS, true) || str_starts_with($value, 'Texture2D ')
+                    || preg_match('/[^\x00-\x7F]/', $value) !== 1) {
+                    return;
+                }
+                $safe = self::toAscii($value);
+                if ($key === 'ClassName') {
+                    $renamed[$value] = $safe;
+                }
+                $value = $safe;
+            });
+        }
+        unset($item);
+
+        foreach ($renamed as $old => $new) {
+            $report->note("{$old} was renamed to {$new}, because the Docs parser only reads ASCII class names");
+        }
+
+        return $entries;
+    }
+
+    private static function toAscii(string $value): string
+    {
+        return (string) preg_replace_callback('/[^\x00-\x7F]+/u', static function (array $match): string {
+            $transliterated = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $match[0]); // @ intentional
+            $clean = preg_replace('/[^A-Za-z0-9_\-]/', '', \is_string($transliterated) ? $transliterated : '');
+
+            return $clean === '' || $clean === null ? '_' : $clean;
+        }, $value);
     }
 
     private static function readableName(string $className): string
