@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mods;
 
+use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Symfony\Component\Process\Process;
 
 /**
@@ -73,7 +74,11 @@ final class ModClassExtractor
 
         $process = new Process($args);
         $process->setTimeout(1800.0);
-        $process->run();
+        try {
+            $process->run();
+        } catch (ProcessSignaledException) {
+            // .NET aborts on an unhandled exception; the message below carries its output.
+        }
         if (!$process->isSuccessful() || !is_file($out)) {
             throw new \RuntimeException(
                 "Mod class extraction failed (exit {$process->getExitCode()}).\n"

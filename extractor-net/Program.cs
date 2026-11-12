@@ -117,8 +117,9 @@ static IFileProvider OpenProvider(
         }
     }
 
-    var probe = manifest[0].AssetPath;
     Exception? last = null;
+    IFileProvider? fallback = null;
+    EGame fallbackGame = candidates[0];
     foreach (var game in candidates)
     {
         try
@@ -131,16 +132,46 @@ static IFileProvider OpenProvider(
             if (mappings != null) provider.MappingsContainer = mappings;
             provider.Initialize();
             provider.SubmitKey(new FGuid(), new FAesKey(aesKey));
-            // Verify by fully decoding the first asset with this engine version.
-            var tex = provider.LoadPackageObject<UTexture2D>(ModPaths.Resolve(provider, probe));
-            _ = (tex.Decode() ?? throw new Exception("probe decode null")).ToSkBitmap();
-            chosen = game;
-            return provider;
+            // Verify by fully decoding an asset with this engine version. A missing or broken
+            // texture says nothing about the engine, so only existing ones are tried, a few at most.
+            var probes = manifest.Select(m => ModPaths.Resolve(provider, m.AssetPath))
+                .Where(path => ModPaths.Exists(provider, path)).Distinct().Take(3).ToList();
+            if (probes.Count == 0)
+            {
+                if (fallback == null)
+                {
+                    fallback = provider;
+                    fallbackGame = game;
+                }
+                continue;
+            }
+            foreach (var probe in probes)
+            {
+                try
+                {
+                    var tex = provider.LoadPackageObject<UTexture2D>(probe);
+                    _ = (tex.Decode() ?? throw new Exception("probe decode null")).ToSkBitmap();
+                    chosen = game;
+                    return provider;
+                }
+                catch (Exception e)
+                {
+                    last = e;
+                }
+            }
         }
         catch (Exception e)
         {
             last = e;
         }
+    }
+
+    if (fallback != null)
+    {
+        // None of the textures exist in the mounted files; every entry is reported as failed.
+        Console.Error.WriteLine("WARN: none of the manifest textures were found in the mounted files.");
+        chosen = fallbackGame;
+        return fallback;
     }
 
     throw new Exception($"No candidate engine version parsed the paks. Last error: {last?.Message}");
@@ -177,6 +208,13 @@ static class ModPaths
             if (provider.Files.ContainsKey(root + package + ".uasset")) return root + rest;
         }
         return assetPath;
+    }
+
+    public static bool Exists(IFileProvider provider, string path)
+    {
+        string package = path.Contains('.') ? path[..path.LastIndexOf('.')] : path;
+        if (package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)) package = "FactoryGame/Content/" + package[6..];
+        return provider.Files.ContainsKey(package.TrimStart('/') + ".uasset");
     }
 }
 

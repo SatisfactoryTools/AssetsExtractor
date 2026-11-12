@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Images;
 
+use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Symfony\Component\Process\Process;
 
 /**
@@ -65,11 +66,20 @@ final class ImageExtractor
 
         $process = new Process($args);
         $process->setTimeout(1800.0);
-        $process->run(function (string $type, string $buffer) use ($onProgress): void {
-            if ($onProgress !== null) {
-                $onProgress($buffer);
-            }
-        });
+        try {
+            $process->run(function (string $type, string $buffer) use ($onProgress): void {
+                if ($onProgress !== null) {
+                    $onProgress($buffer);
+                }
+            });
+        } catch (ProcessSignaledException $e) {
+            // .NET aborts on an unhandled exception; its message is only in the output.
+            throw new \RuntimeException(
+                "Image extractor crashed (signal {$e->getSignal()}).\n" .
+                substr($process->getErrorOutput() . $process->getOutput(), -2000),
+                previous: $e,
+            );
+        }
 
         $resultPath = $outDir . '/' . self::RESULT_FILE;
         if (!is_file($resultPath)) {
