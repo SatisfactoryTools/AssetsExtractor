@@ -98,6 +98,14 @@ final class DocsFile
         return $this->paths[$className] ?? null;
     }
 
+    /** @return list<string> every class name the file lists or refers to */
+    public function knownClassNames(): array
+    {
+        $this->classPath('');
+
+        return array_values(array_unique([...array_keys($this->byClass), ...array_keys($this->paths ?? [])]));
+    }
+
     /** @return list<array{NativeClass:string,Classes:list<array<string,mixed>>}> */
     public function groups(): array
     {

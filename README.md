@@ -211,7 +211,9 @@ converted to Docs entries the way ContentLib reads them: new items, recipes and 
 their file), `UnlockedBy` on recipes, visual kits (PNG icons from `ContentLib/Icons/` are scaled here,
 like extracted textures) and item/recipe/schematic patches, which change existing classes. A changed
 base-game or dependency class replaces that class when the mod is parsed, so it comes out in the mod's
-data. `CDOs/` files are reported, not imported.
+data. `CDOs/` files (direct property edits) are applied to the properties the `Docs` list for that
+class. Names resolve the way ContentLib resolves them (`_C` optional, case ignored). Class names DocsParser
+cannot read (`Build_X_SF+_C`, `Recipe_X™_C`) are renamed, with every reference, right before parsing.
 
 Classes built on a mod's own C++ classes have no readable parent: the paks store it only as a hash
 of `/Script/<Module>.<Class>`, which is matched against the identifiers in the mod DLLs to name it.

@@ -20,6 +20,9 @@ final class ModEntries
     /** @var array<string,array{native:string,entry:array<string,mixed>}> class name => changed class of a dependency or the game */
     private array $overrides = [];
 
+    /** @var array<string,string>|null lowercase name => class name of the dependencies and the game */
+    private ?array $caseless = null;
+
     /**
      * @param list<array{native:string,entry:array<string,mixed>}> $entries
      * @param list<array{native:string,entry:array<string,mixed>}> $context entries of the mod's dependencies
@@ -143,9 +146,28 @@ final class ModEntries
             $name = substr($name, strrpos($name, '.') + 1);
         }
         $name = rtrim($name, "'\"");
-        foreach (str_ends_with($name, '_C') ? [$name] : [$name . '_C', $name] as $candidate) {
+        $name = (string) preg_replace('/^Default__/', '', $name);
+        $candidates = preg_match('/_C$/i', $name) ? [$name] : [$name . '_C', $name];
+        foreach ($candidates as $candidate) {
             if ($this->has($candidate) || $this->docs->classPath($candidate) !== null) {
                 return $candidate;
+            }
+        }
+        // Unreal compares names without case, and mods rely on it (Desc_LiquidTurbofuel).
+        if ($this->caseless === null) {
+            $this->caseless = [];
+            foreach ([...$this->docs->knownClassNames(), ...array_keys($this->context), ...array_keys($this->inheritedOverrides)] as $known) {
+                $this->caseless[strtolower((string) $known)] = (string) $known;
+            }
+        }
+        foreach ($candidates as $candidate) {
+            foreach (array_keys($this->entries) as $own) {
+                if (strcasecmp($own, $candidate) === 0) {
+                    return $own;
+                }
+            }
+            if (isset($this->caseless[strtolower($candidate)])) {
+                return $this->caseless[strtolower($candidate)];
             }
         }
 

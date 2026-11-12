@@ -20,6 +20,7 @@ use App\Mods\ModEnvironment;
 use App\Mods\ModReport;
 use App\Mods\ModSetResolver;
 use App\Mods\ModSource;
+use App\Mods\SafeClassNames;
 use App\Mods\NativeDefaults;
 use App\Mods\SmodPackage;
 use App\Mods\SmrClient;
@@ -229,8 +230,8 @@ final class ModImportCommand extends Command
             $adapters->describe($source, $report);
             $adapter = $adapters->for($source);
             $adapter?->patchEntries($modEntries, $report);
-            $entries[$ref] = $modEntries->all();
-            $overrides[$ref] = $modEntries->overrides();
+            $entries[$ref] = SafeClassNames::apply($modEntries->all(), $report);
+            $overrides[$ref] = SafeClassNames::applyKeyed($modEntries->overrides(), $report);
             if ($overrides[$ref] !== []) {
                 $report->note(sprintf('it changes %d existing class(es): %s', \count($overrides[$ref]), implode(', ', array_keys($overrides[$ref]))));
             }

@@ -44,17 +44,20 @@ final class ContentLibFolder
             $name = pathinfo($path, PATHINFO_FILENAME);
             $contents = (string) file_get_contents($path);
             $contents = preg_replace('/^\xEF\xBB\xBF/', '', $contents) ?? $contents;
-            $target = null;
-            if (str_ends_with($type, 'Patches') || $type === self::CDOS) {
-                // A patch starts with a comment line naming its target: //Game/Path/Asset.Asset_C
-                if (preg_match('#^\s*//\s*(\S+)#', $contents, $m)) {
-                    $target = (string) preg_replace('#^.*[./]#', '', $m[1]);
-                }
-            }
             $data = self::decode($contents);
             if ($data === null) {
                 $this->errors[] = "{$type}/{$name}.json is not valid JSON";
                 continue;
+            }
+            $target = null;
+            if (str_ends_with($type, 'Patches') || $type === self::CDOS) {
+                // A patch names its target in a first comment line (//Game/Path/Asset.Asset_C); a CDO in "Class".
+                if (preg_match('#^\s*//\s*(\S+)#', $contents, $m)) {
+                    $target = $m[1];
+                } elseif (\is_string($data['Class'] ?? null)) {
+                    $target = $data['Class'];
+                }
+                $target = $target !== null ? (string) preg_replace(['/\.json$/i', '#^.*[./]#', '/^Default__/'], '', $target) : null;
             }
             $files[] = new ContentLibFile($name, $data, $target);
         }

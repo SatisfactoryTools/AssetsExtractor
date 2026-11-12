@@ -6,7 +6,6 @@ namespace App\Mods;
 
 use SFTools\Data\Parser\ClassData;
 use SFTools\Data\Schema\DocsSchema;
-use SFTools\Data\Unpacker;
 
 /**
  * Turns dumped mod classes into complete Docs entries. A class default object only
@@ -59,8 +58,6 @@ final class DocsEntryBuilder
      * @param array<string,string> $classMap class name => /Script/FactoryGame.<native class>
      */
     private const FALLBACK_STACK_SIZE = 'SS_MEDIUM';
-
-    private const TEXT_KEYS = ['mDisplayName', 'mDescription', 'mAbbreviatedDisplayName', 'mSmallIcon', 'mPersistentBigIcon'];
 
     public function __construct(
         private readonly DocsFile $docs,
@@ -212,8 +209,6 @@ final class DocsEntryBuilder
             $report->count($resolved['native']);
         }
 
-        $entries = $this->asciiSafe($entries, $report);
-
         foreach ($stackSizes as $value => $classes) {
             $report->note(sprintf('mStackSize %s is not a game value, so %s use%s %s instead (the planner does not use stack sizes)',
                 $value, implode(', ', $classes), \count($classes) === 1 ? 's' : '', self::FALLBACK_STACK_SIZE));
@@ -225,48 +220,6 @@ final class DocsEntryBuilder
         }
 
         return ['entries' => $entries, 'report' => $report];
-    }
-
-    /**
-     * DocsParser's tokenizer only takes ASCII in class paths, so a class like "Recipe_Foo™_C" fails the whole parse.
-     * The same conversion runs on names and on every reference, which keeps them matching.
-     * @param list<array{native:string,entry:array<string,mixed>}> $entries
-     * @return list<array{native:string,entry:array<string,mixed>}>
-     */
-    private function asciiSafe(array $entries, ModReport $report): array
-    {
-        $renamed = [];
-        foreach ($entries as &$item) {
-            array_walk_recursive($item['entry'], static function (mixed &$value, string|int $key) use (&$renamed): void {
-                // Item icons are read as plain strings and must keep the real path for the image extractor.
-                if (!\is_string($value) || \in_array($key, self::TEXT_KEYS, true) || str_starts_with($value, 'Texture2D ')
-                    || preg_match('/[^\x00-\x7F]/', $value) !== 1) {
-                    return;
-                }
-                $safe = self::toAscii($value);
-                if ($key === 'ClassName') {
-                    $renamed[$value] = $safe;
-                }
-                $value = $safe;
-            });
-        }
-        unset($item);
-
-        foreach ($renamed as $old => $new) {
-            $report->note("{$old} was renamed to {$new}, because the Docs parser only reads ASCII class names");
-        }
-
-        return $entries;
-    }
-
-    private static function toAscii(string $value): string
-    {
-        return (string) preg_replace_callback('/[^\x00-\x7F]+/u', static function (array $match): string {
-            $transliterated = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $match[0]); // @ intentional
-            $clean = preg_replace('/[^A-Za-z0-9_\-]/', '', \is_string($transliterated) ? $transliterated : '');
-
-            return $clean === '' || $clean === null ? '_' : $clean;
-        }, $value);
     }
 
     private static function readableName(string $className): string
@@ -548,11 +501,7 @@ final class DocsEntryBuilder
             : '';
 
         $fuels = [];
-        foreach ((array) Unpacker::unpack((string) ($entry['mDefaultFuelClasses'] ?? '')) as $fuelPath) {
-            if (!\is_string($fuelPath) || $fuelPath === '') {
-                continue;
-            }
-            $fuel = self::className($fuelPath);
+        foreach (self::listedClasses((string) ($entry['mDefaultFuelClasses'] ?? '')) as $fuel) {
             $item = $this->findEntry($fuel, $candidates);
             $waste = \is_array($item) ? self::className((string) ($item['mSpentFuelClass'] ?? '')) : '';
             $fuels[] = [
@@ -618,12 +567,11 @@ final class DocsEntryBuilder
      */
     private function productName(array $entry, array $candidates): ?string
     {
-        $products = Unpacker::unpack((string) ($entry['mProduct'] ?? ''));
-        $first = \is_array($products) ? ($products[0]['ItemClass'] ?? null) : null;
-        if (!\is_string($first)) {
+        $first = self::listedClasses((string) ($entry['mProduct'] ?? ''))[0] ?? null;
+        if ($first === null) {
             return null;
         }
-        $item = $this->findEntry(self::className($first), $candidates);
+        $item = $this->findEntry($first, $candidates);
         $name = $item['mDisplayName'] ?? null;
 
         return \is_string($name) && $name !== '' ? $name : null;
@@ -657,6 +605,25 @@ final class DocsEntryBuilder
         }
 
         return array_intersect(self::CONTENT_KEYS, array_keys((array) $class['properties'])) !== [];
+    }
+
+    /**
+     * The classes a Docs list refers to, in order. Read without DocsParser's tokenizer, which stops at characters
+     * mod class names may still contain at this point (they are made safe after the entries are built).
+     * @return list<string>
+     */
+    private static function listedClasses(string $list): array
+    {
+        preg_match_all('/"([^"]*)"/', $list, $matches);
+        $classes = [];
+        foreach ($matches[1] as $reference) {
+            $class = self::className(preg_match("/'([^']*)'/", $reference, $m) ? $m[1] : $reference);
+            if ($class !== '') {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
     }
 
     private static function className(string $reference): string

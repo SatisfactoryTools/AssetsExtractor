@@ -66,9 +66,9 @@ final class ContentLibConverter
         $this->patch(ContentLibFolder::RECIPE_PATCHES, 'recipe', fn(array $entry, ContentLibFile $file) => $this->applyRecipe($entry, $file->data, true));
         $this->patch(ContentLibFolder::SCHEMATIC_PATCHES, 'schematic', fn(array $entry, ContentLibFile $file) => $this->applySchematic($entry, $file, true, true));
 
-        $cdos = $this->folder->count(ContentLibFolder::CDOS);
-        if ($cdos > 0) {
-            $this->report->note("ContentLib: {$cdos} CDO file(s) change class defaults directly; they are not imported");
+        $this->patch(ContentLibFolder::CDOS, 'CDO edits', fn(array $entry, ContentLibFile $file) => $this->applyCdo($entry, $file));
+        foreach ($this->folder->files(ContentLibFolder::CDOS) as $file) {
+            $this->nameDescriptor($file);
         }
         foreach ($this->folder->errors() as $error) {
             $this->report->note("ContentLib: {$error}");
@@ -341,6 +341,63 @@ final class ContentLibConverter
         }
 
         return $entry;
+    }
+
+    /**
+     * A CDO file sets class properties directly ({"Class": …, "Edits": [{"Property": …, "Value": …}]}). Only
+     * properties the Docs list for the class are kept; the rest do not reach the planner.
+     * @param array<string,mixed> $entry
+     * @return array<string,mixed>
+     */
+    private function applyCdo(array $entry, ContentLibFile $file): array
+    {
+        $ignored = [];
+        $applied = 0;
+        foreach ((array) ($file->data['Edits'] ?? []) as $edit) {
+            $property = (string) ($edit['Property'] ?? '');
+            $value = $edit['Value'] ?? null;
+            if ($property === '' || !\array_key_exists($property, $entry) || \is_array($entry[$property]) || !\is_scalar($value)) {
+                $ignored[] = $property;
+                continue;
+            }
+            $old = (string) $entry[$property];
+            $entry[$property] = match (true) {
+                \is_bool($value) => $value ? 'True' : 'False',
+                is_numeric($value) && preg_match('/^-?\d+\.\d+$/', $old) === 1 => sprintf('%.6f', (float) $value),
+                default => (string) $value,
+            };
+            $applied++;
+        }
+        if ($applied === 0) {
+            throw new SkipException('it sets nothing SFTools reads');
+        }
+        if ($ignored !== []) {
+            $this->report->note(sprintf('ContentLib: CDOs/%s also sets %s, which SFTools does not read', $file->name, implode(', ', array_unique($ignored))));
+        }
+
+        return $entry;
+    }
+
+    /** The planner names a building after its descriptor, which the game fills from the building. */
+    private function nameDescriptor(ContentLibFile $file): void
+    {
+        $building = $file->target !== null ? $this->entries->resolve($file->target) : null;
+        $descriptor = $building !== null && str_starts_with($building, 'Build_') ? $this->entries->resolve('Desc_' . substr($building, 6)) : null;
+        if ($descriptor === null) {
+            return;
+        }
+        $entry = $this->entries->get($descriptor);
+        $changed = false;
+        foreach ((array) ($file->data['Edits'] ?? []) as $edit) {
+            $property = (string) ($edit['Property'] ?? '');
+            if (\in_array($property, ['mDisplayName', 'mDescription'], true) && \is_string($edit['Value'] ?? null) && \array_key_exists($property, $entry)) {
+                $entry[$property] = $edit['Value'];
+                $changed = true;
+            }
+        }
+        if ($changed) {
+            $this->entries->set($descriptor, $entry);
+        }
     }
 
     /** A recipe can add itself to schematics, base-game ones included. */
