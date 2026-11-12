@@ -8,6 +8,8 @@ using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.IO.Objects;
+using CUE4Parse.Utils;
 using CUE4Parse.UE4.Assets.Exports.Engine;
 using CUE4Parse.UE4.Localization;
 using CUE4Parse.UE4.Readers;
@@ -26,7 +28,7 @@ using CUE4Parse.UE4.Versions;
 //
 // Usage:
 //   ModExtractor --install-dir <game install> --out <classes.json>
-//                [--mods-file <mods.json>]       [{"reference": "Easy_Recipes", "paksDir": "/x/Content/Paks"}]
+//                [--mods-file <mods.json>]       [{"reference": "Easy_Recipes", "paksDir": "/x/Content/Paks", "binariesDir": "/x/Binaries"}]
 //                [--packages-file <packages.json>] ["/Game/FactoryGame/Recipes/Constructor/Recipe_IronPlate"]
 //                [--class-names-file <names.json>] ["Desc_IronPlate_C"]
 //                [--base-tables <regex>]           base-game data tables to dump, by package name
@@ -59,6 +61,10 @@ var main = OpenWithEngine(paksDir, mods.Select(m => m.PaksDir).ToArray(), candid
 Console.WriteLine($"Engine: {mainEngine} | mounted files: {main.Files.Count}");
 
 var result = new DumpResult(mainEngine.ToString(), [], null);
+
+foreach (var mod in mods)
+    if (mod.BinariesDir is { } binaries && Directory.Exists(binaries))
+        ModCode.AddLibraries(binaries);
 
 // Most Docs entries do not say which package they come from, so base classes are also
 // looked up by name: a blueprint class X_C lives in a package named X.
@@ -178,20 +184,30 @@ static ClassDump DumpClass(UClass cls, string packagePath)
 {
     string? super = null;
     bool superResolved = true;
+    bool superModCode = false;
     if (cls.SuperStruct is { IsNull: false } superIndex)
     {
         var resolved = superIndex.ResolvedObject;
         if (resolved != null)
             super = NormalizePath(resolved.GetPathName());
         else
+        {
             superResolved = false;
+            // A mod's own C++ classes are not in the game's script object table, so the import is only a hash.
+            if (superIndex.IsImport && superIndex.Owner is IoPackage io && -superIndex.Index - 1 < io.ImportMap.Length
+                && io.ImportMap[-superIndex.Index - 1] is { IsScriptImport: true } import)
+            {
+                superModCode = true;
+                super = ModCode.Name(import.Value);
+            }
+        }
     }
 
     var properties = new Dictionary<string, object>();
     if (cls.ClassDefaultObject is { IsNull: false } cdoIndex && cdoIndex.TryLoad(out var cdo) && cdo != null)
         properties = Exporter.Properties(cdo);
 
-    return new ClassDump(cls.Name, packagePath, $"{cls.ExportType} {packagePath}.{cls.Name}", super, superResolved,
+    return new ClassDump(cls.Name, packagePath, $"{cls.ExportType} {packagePath}.{cls.Name}", super, superResolved, superModCode,
         cls.ClassFlags.HasFlag(EClassFlags.CLASS_Abstract), properties);
 }
 
@@ -480,7 +496,56 @@ static class Exporter
 
 sealed record ModInput(
     [property: JsonPropertyName("reference")] string Reference,
-    [property: JsonPropertyName("paksDir")] string PaksDir);
+    [property: JsonPropertyName("paksDir")] string PaksDir,
+    [property: JsonPropertyName("binariesDir")] string? BinariesDir = null);
+
+// Names a mod's C++ classes. IoStore stores imports of them only as a hash of "/Script/Module.Class",
+// so every identifier the module's DLL holds (UE keeps class names as UTF-16 strings) is hashed the same way.
+static class ModCode
+{
+    private static readonly Dictionary<ulong, string> Names = [];
+
+    public static void AddLibraries(string binariesDir)
+    {
+        foreach (var dll in Directory.EnumerateFiles(binariesDir, "*.dll", SearchOption.AllDirectories))
+        {
+            // FactoryGameSteam-<Module>-Win64-Shipping.dll
+            var parts = Path.GetFileNameWithoutExtension(dll).Split('-');
+            if (parts.Length < 4) continue;
+            var module = string.Join('-', parts[1..^2]);
+            foreach (var name in WideIdentifiers(File.ReadAllBytes(dll)))
+            {
+                var path = $"/Script/{module}.{name}";
+                Names.TryAdd(ImportHash(path), path);
+            }
+        }
+    }
+
+    public static string? Name(ulong hash) => Names.GetValueOrDefault(hash);
+
+    // FPackageObjectIndex::GenerateImportHashFromObjectPath
+    private static ulong ImportHash(string objectPath)
+    {
+        var chars = objectPath.Select(c => c is '.' or ':' ? '/' : char.ToLowerInvariant(c)).ToArray();
+        return CityHash.CityHash64(Encoding.Unicode.GetBytes(chars)) & ~(3UL << 62);
+    }
+
+    private static IEnumerable<string> WideIdentifiers(byte[] bytes)
+    {
+        var current = new StringBuilder();
+        for (int i = 0; i + 1 < bytes.Length; i += 2)
+        {
+            char c = (char)(bytes[i] | bytes[i + 1] << 8);
+            if (c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_')
+            {
+                current.Append(c);
+                continue;
+            }
+            if (current.Length >= 3 && current.Length <= 128) yield return current.ToString();
+            current.Clear();
+        }
+    }
+}
 
 sealed record FailedPackage(
     [property: JsonPropertyName("path")] string Path,
@@ -492,6 +557,7 @@ sealed record ClassDump(
     [property: JsonPropertyName("fullName")] string FullName,
     [property: JsonPropertyName("super")] string? Super,
     [property: JsonPropertyName("superResolved")] bool SuperResolved,
+    [property: JsonPropertyName("superModCode")] bool SuperModCode,
     [property: JsonPropertyName("abstract")] bool Abstract,
     [property: JsonPropertyName("properties")] Dictionary<string, object> Properties);
 

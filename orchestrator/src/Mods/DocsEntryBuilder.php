@@ -34,6 +34,15 @@ final class DocsEntryBuilder
     /** @var array<string,array<string,mixed>|string> class path => resolved {native, entry, own} or failure reason */
     private array $resolved = [];
 
+    /** @var array<string,array{native:string,codeClass:?string}> class name => type guessed for a class built on mod code */
+    private array $guesses = [];
+
+    /** @var array<string,?string> class path => mod C++ class it extends, for classes whose type could not be guessed yet */
+    private array $unguessed = [];
+
+    /** @var array<string,string> class path => native class taken from a child's hints */
+    private array $forced = [];
+
     /** @var array<string,string> old building class name => new one */
     private array $renames = [];
 
@@ -49,6 +58,8 @@ final class DocsEntryBuilder
     /**
      * @param array<string,string> $classMap class name => /Script/FactoryGame.<native class>
      */
+    private const FALLBACK_STACK_SIZE = 'SS_MEDIUM';
+
     private const TEXT_KEYS = ['mDisplayName', 'mDescription', 'mAbbreviatedDisplayName', 'mSmallIcon', 'mPersistentBigIcon'];
 
     public function __construct(
@@ -121,6 +132,7 @@ final class DocsEntryBuilder
         $report = new ModReport($reference);
         $candidates = [];
         $skipped = [];
+        $stackSizes = [];
         foreach ($this->classes as $path => $class) {
             if ($this->owners[$path] !== $reference) {
                 continue;
@@ -143,6 +155,7 @@ final class DocsEntryBuilder
             if (($class['abstract'] ?? false) === true) {
                 continue;
             }
+            $resolved = $this->fixStackSize($resolved, $stackSizes);
             $invalid = $this->invalidEnum($resolved);
             if ($invalid !== null) {
                 $report->skip($class['className'], $invalid);
@@ -155,6 +168,14 @@ final class DocsEntryBuilder
             }
             $this->emitted[$class['className']] = true;
             $candidates[] = $resolved + ['fromMod' => !str_starts_with($path, '/Game/')];
+        }
+
+        // After the loop: a child can settle the type of a base blueprint visited before it.
+        foreach ($this->classes as $path => $class) {
+            if ($this->owners[$path] === $reference && isset($this->guesses[$class['className']])) {
+                $guess = $this->guesses[$class['className']];
+                $report->guess($class['className'], $guess['native'], $guess['codeClass']);
+            }
         }
 
         $this->renameBuildings($candidates, $report);
@@ -192,6 +213,11 @@ final class DocsEntryBuilder
         }
 
         $entries = $this->asciiSafe($entries, $report);
+
+        foreach ($stackSizes as $value => $classes) {
+            $report->note(sprintf('mStackSize %s is not a game value, so %s use%s %s instead (the planner does not use stack sizes)',
+                $value, implode(', ', $classes), \count($classes) === 1 ? 's' : '', self::FALLBACK_STACK_SIZE));
+        }
 
         if ($unnamed !== []) {
             $report->note(sprintf('%d schematic(s) have no name (%s); they are named after their class. Mods often grant such schematics in code, depending on settings, so their recipes may not all be available together in the game',
@@ -270,17 +296,31 @@ final class DocsEntryBuilder
         }
 
         $super = $class['super'] ?? null;
-        $mapped = $this->classMap[$class['className']] ?? null;
+        $modCode = ($class['superModCode'] ?? false) === true || !\is_string($super) || $super === '';
+        $codeClass = $modCode && \is_string($super) && $super !== '' ? self::shortName($super) : null;
+        $mapped = $this->classMap[$class['className']] ?? ($codeClass !== null ? $this->mappedCodeClass($codeClass) : null);
         if ($mapped !== null) {
             $parent = ['native' => $mapped, 'entry' => $this->defaults->forClass($mapped), 'own' => []];
-        } elseif (!\is_string($super) || $super === '') {
-            $parent = 'it extends a class from the mod\'s own code';
+        } elseif ($modCode) {
+            $guess = $this->forced[$path] ?? $this->guessNative($class, $codeClass);
+            if ($guess === null) {
+                $this->unguessed[$path] = $codeClass;
+                $parent = $codeClass !== null
+                    ? "it extends {$codeClass} from the mod's own code"
+                    : 'it extends a class from the mod\'s own code';
+            } else {
+                $this->guesses[$class['className']] = ['native' => $guess, 'codeClass' => $codeClass];
+                $parent = ['native' => $guess, 'entry' => $this->defaults->forClass($guess), 'own' => []];
+            }
         } elseif (str_starts_with($super, '/Script/FactoryGame.')) {
             $parent = ['native' => $super, 'entry' => $this->defaults->forClass($super), 'own' => []];
         } elseif (str_starts_with($super, '/Script/')) {
             $parent = 'it extends ' . $super;
         } else {
             $parent = $this->resolve($super, $depth + 1);
+            if (\is_string($parent)) {
+                $parent = $this->guessFromChild($class, $super, $depth) ?? $parent;
+            }
         }
 
         if (\is_string($parent)) {
@@ -317,6 +357,95 @@ final class DocsEntryBuilder
     }
 
     /** @param array{native:string,entry:array<string,mixed>} $resolved */
+    /**
+     * A base blueprint between a mod C++ class and its children often sets nothing that shows its type, but the
+     * children do. Their type then goes to the base blueprint, so they keep what they inherit from it.
+     * @param array<string,mixed> $class
+     * @return array<string,mixed>|null
+     */
+    private function guessFromChild(array $class, string $super, int $depth): ?array
+    {
+        $chain = [];
+        for ($path = $super; isset($this->classes[$path]) && !\array_key_exists($path, $this->unguessed) && \count($chain) < 32; $path = (string) ($this->classes[$path]['super'] ?? '')) {
+            $chain[] = $path;
+        }
+        if (!\array_key_exists($path, $this->unguessed)) {
+            return null;
+        }
+        $codeClass = $this->unguessed[$path];
+        $guess = $this->guessNative($class, $codeClass);
+        if ($guess === null) {
+            return null;
+        }
+        $this->forced[$path] = $guess;
+        unset($this->unguessed[$path], $this->resolved[$path]);
+        foreach ($chain as $link) {
+            unset($this->resolved[$link]);
+        }
+        $parent = $this->resolve($super, $depth + 1);
+
+        return \is_array($parent) ? $parent : null;
+    }
+
+    private function mappedCodeClass(string $codeClass): ?string
+    {
+        foreach ([$codeClass, 'U' . $codeClass, 'A' . $codeClass] as $key) {
+            if (isset($this->classMap[$key])) {
+                return $this->classMap[$key];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Mod C++ classes almost always extend a standard game type, and what a blueprint sets shows which one.
+     * @param array<string,mixed> $class
+     */
+    private function guessNative(array $class, ?string $codeClass): ?string
+    {
+        $keys = array_keys((array) $class['properties']);
+        $has = static fn(string ...$wanted): bool => array_intersect($wanted, $keys) !== [];
+        $name = (string) $class['className'];
+        $code = $codeClass ?? '';
+
+        $native = match (true) {
+            $has('mIngredients', 'mProduct') || str_starts_with($name, 'Recipe_') || str_contains($code, 'Recipe') => 'FGRecipe',
+            $has('mUnlocks', 'mTechTier', 'mSchematicCategory') || preg_match('/^(Schematic|Research)_/', $name) === 1 || str_contains($code, 'Schematic') => 'FGSchematic',
+            $has('mBuildableClass') => 'FGBuildingDescriptor',
+            $has('mDefaultFuelClasses', 'mPowerProduction') => 'FGBuildableGeneratorFuel',
+            $has('mManufacturingSpeed', 'mPowerConsumption', 'mInputInventory', 'mOutputInventory') || str_starts_with($name, 'Build_') => 'FGBuildableManufacturer',
+            // Not by the C++ name alone: other descriptor kinds (attachments, categories) also end in "Descriptor".
+            $has('mStackSize', 'mForm', 'mEnergyValue', 'mCachedStackSize') || preg_match('/(^|_)Desc_/', $name) === 1 => 'FGItemDescriptor',
+            default => null,
+        };
+        if ($native === null) {
+            return null;
+        }
+        $native = '/Script/FactoryGame.' . $native;
+
+        return $this->defaults->has($native) ? $native : null;
+    }
+
+    /**
+     * DocsParser rejects stack sizes it does not know, and without the item every recipe using it goes too.
+     * @param array<string,mixed> $resolved
+     * @param array<string,list<string>> $replaced value => class names, filled in
+     * @return array<string,mixed>
+     */
+    private function fixStackSize(array $resolved, array &$replaced): array
+    {
+        $value = $resolved['entry']['mStackSize'] ?? null;
+        $known = $this->docs->values($resolved['native'], 'mStackSize');
+        if (!\is_string($value) || $known === [] || isset($known[$value]) || !isset($known[self::FALLBACK_STACK_SIZE])) {
+            return $resolved;
+        }
+        $resolved['entry']['mStackSize'] = self::FALLBACK_STACK_SIZE;
+        $replaced[$value][] = (string) $resolved['className'];
+
+        return $resolved;
+    }
+
     private function invalidEnum(array $resolved): ?string
     {
         foreach (self::ENUM_KEYS as $key) {

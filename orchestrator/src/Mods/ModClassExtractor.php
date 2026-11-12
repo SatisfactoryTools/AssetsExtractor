@@ -26,7 +26,7 @@ final class ModClassExtractor
     }
 
     /**
-     * @param list<array{reference:string,paksDir:string}> $mods
+     * @param list<array{reference:string,paksDir:string,binariesDir?:string}> $mods
      * @param list<string> $packages base-game package paths, e.g. /Game/FactoryGame/Recipes/Constructor/Recipe_IronPlate
      * @param list<string> $classNames base-game class names to find by package name
      * @param string|null $baseTables regex of base-game data table package names to read too

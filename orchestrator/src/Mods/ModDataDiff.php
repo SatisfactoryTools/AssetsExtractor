@@ -106,8 +106,29 @@ final class ModDataDiff
             }
         }
 
+        $diff = self::dropEquipmentStubs($diff);
+
         if (isset($diff['recipes']) && $diff['recipes'] === []) {
             unset($diff['recipes']);
+        }
+
+        return $diff;
+    }
+
+    /**
+     * DocsParser makes an item for every class with an equipment slot, named after the base game's Equip_X →
+     * BP_EquipmentDescriptorX convention; a mod's equipment classes follow no such convention, so they become
+     * nameless items nothing uses.
+     * @param array<string,mixed> $diff
+     * @return array<string,mixed>
+     */
+    private static function dropEquipmentStubs(array $diff): array
+    {
+        $json = json_encode(array_diff_key($diff, ['items' => true]), JSON_THROW_ON_ERROR);
+        foreach ((array) ($diff['items'] ?? []) as $className => $item) {
+            if (($item['name'] ?? '') === '' && ($item['icon'] ?? null) === null && !str_contains($json, '"' . $className . '"')) {
+                unset($diff['items'][$className]);
+            }
         }
 
         return $diff;

@@ -205,11 +205,18 @@ is the API's `modImport.ownerUuid`). Mods are private unless `--public` is given
    mod adds or changes is the mod version's data. Recipes using unknown items are dropped, icons are
    published like a build's, and the data is handed to the API with links to the dependency versions.
 
+Classes built on a mod's own C++ classes have no readable parent: the paks store it only as a hash
+of `/Script/<Module>.<Class>`, which is matched against the identifiers in the mod DLLs to name it.
+Their standard game type is guessed from what the blueprint sets (ingredients → recipe, stack size or
+`Desc_` → item, power or inventories or `Build_` → manufacturer, …); a base blueprint that shows
+nothing takes its children's type. Values the C++ class sets in code (a generator's output, for one)
+are not in the files, so guessed classes come out with standard defaults.
+
 The report lists, per mod, whether it ships code (DLLs) or is blueprint-only, what was imported,
-which classes were left out and why (most often: they extend the mod's own C++ classes), types
-SFTools does not read, and content the files cannot show (ContentLib, conditional schematics,
-replaced base-game files). `--class-map Build_X_C=FGBuildableGeneratorFuel` imports a class that
-extends mod code as a standard game type. Everything a run produced stays in
+which classes were left out and why, the guessed types (grouped by C++ class), types SFTools does
+not read, and content the files cannot show (ContentLib, conditional schematics, replaced base-game
+files). `--class-map` replaces a guess: per blueprint (`Build_X_C=FGBuildableGeneratorFuel`) or per
+C++ class for every blueprint built on it (`FFPlotRecipe=FGRecipe`). Everything a run produced stays in
 `data/artifacts/mods/<time>-<mod>/` (`report.json`, `data/*.json`).
 
 `mod:selftest` rebuilds every base-game class the same way and compares the parsed result with the

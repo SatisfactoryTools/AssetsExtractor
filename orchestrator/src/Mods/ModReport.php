@@ -30,6 +30,9 @@ final class ModReport
     /** @var list<string> */
     public array $notes = [];
 
+    /** @var array<string,array{native:string,codeClass:?string}> class name => type guessed for a class built on the mod's code */
+    public array $guessed = [];
+
     /** @var array<string,int> category => new or changed entries in the result */
     public array $result = [];
 
@@ -50,6 +53,11 @@ final class ModReport
     public function ignoreType(string $native): void
     {
         $this->ignoredTypes[$native] = ($this->ignoredTypes[$native] ?? 0) + 1;
+    }
+
+    public function guess(string $className, string $native, ?string $codeClass): void
+    {
+        $this->guessed[$className] = ['native' => $native, 'codeClass' => $codeClass];
     }
 
     public function note(string $note): void
@@ -99,6 +107,18 @@ final class ModReport
             $lines[] = '  Types SFTools does not read: ' . implode(', ', $parts);
         }
 
+        if ($this->guessed !== []) {
+            $groups = [];
+            foreach ($this->guessed as $class => $guess) {
+                $groups[($guess['codeClass'] ?? 'unknown C++ class') . ' → ' . self::shortNative($guess['native'])][] = $class;
+            }
+            $lines[] = sprintf('  Guessed types (%d classes built on the mod\'s own code; check them, --class-map overrides):', \count($this->guessed));
+            foreach ($groups as $group => $classes) {
+                $shown = \array_slice($classes, 0, 4);
+                $lines[] = sprintf('    - %s (%d): %s%s', $group, \count($classes), implode(', ', $shown), \count($classes) > 4 ? ', …' : '');
+            }
+        }
+
         foreach ($this->notes as $note) {
             $lines[] = "  Note: {$note}";
         }
@@ -119,6 +139,7 @@ final class ModReport
             'result' => $this->result,
             'skipped' => $this->skipped,
             'ignoredTypes' => $this->ignoredTypes,
+            'guessed' => $this->guessed,
             'notes' => $this->notes,
         ];
     }

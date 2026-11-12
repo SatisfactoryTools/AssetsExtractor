@@ -56,7 +56,7 @@ final class ModImportCommand extends Command
             ->addOption('branch', null, InputOption::VALUE_REQUIRED, 'Logical branch whose game install the mod is read against', 'stable')
             ->addOption('install-dir', null, InputOption::VALUE_REQUIRED, 'Read against this game install instead of the branch install')
             ->addOption('public', null, InputOption::VALUE_NONE, 'Make the imported mods public (default: private to the configured owner)')
-            ->addOption('class-map', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Treat a class that extends the mod\'s own code as a standard game type, e.g. Build_RP_MicroReactor_C=FGBuildableGeneratorFuel')
+            ->addOption('class-map', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Treat a class built on the mod\'s own code as a standard game type, instead of the guessed one: a blueprint (Build_RP_MicroReactor_C=FGBuildableGeneratorFuel) or a mod C++ class, for all blueprints built on it (FFPlotRecipe=FGRecipe)')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Only write the data files and the report; publish no icons and do not call the API');
     }
 
@@ -165,7 +165,7 @@ final class ModImportCommand extends Command
     ): array {
         $io->section('Reading classes');
         $docs = DocsFile::load($env->docsFile);
-        $mods = array_values(array_map(static fn(ModSource $s) => ['reference' => $s->reference, 'paksDir' => $s->package->paksDir], $sources));
+        $mods = array_values(array_map(static fn(ModSource $s) => ['reference' => $s->reference, 'paksDir' => $s->package->paksDir, 'binariesDir' => $s->package->dir . '/Binaries'], $sources));
         $dump = $env->classExtractor->extract($env->installDir, "{$workDir}/dump", $mods,
             $docs->blueprintPackages(), $docs->blueprintClassNames(), ModClassExtractor::SINK_TABLES);
 
@@ -358,10 +358,12 @@ final class ModImportCommand extends Command
     {
         $map = [];
         foreach ($pairs as $pair) {
-            if (!preg_match('/^([A-Za-z0-9_\-]+)=([A-Za-z0-9_.\/]+)$/', $pair, $m)) {
+            if (!preg_match('/^([A-Za-z0-9_\-.\/]+)=([A-Za-z0-9_.\/]+)$/', $pair, $m)) {
                 return "--class-map expects Class_C=FGNativeClass, got '{$pair}'.";
             }
-            $map[$m[1]] = str_starts_with($m[2], '/Script/') ? $m[2] : '/Script/FactoryGame.' . $m[2];
+            // A C++ class may be given by its full script path.
+            $key = str_contains($m[1], '.') ? substr($m[1], strrpos($m[1], '.') + 1) : $m[1];
+            $map[$key] = str_starts_with($m[2], '/Script/') ? $m[2] : '/Script/FactoryGame.' . $m[2];
         }
 
         return $map;
