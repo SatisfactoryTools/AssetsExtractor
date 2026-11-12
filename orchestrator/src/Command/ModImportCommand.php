@@ -6,11 +6,13 @@ namespace App\Command;
 
 use App\Config;
 use App\Docs\ImageManifest;
+use App\Mods\Adapters\ModAdapters;
 use App\Mods\DocsEntryBuilder;
 use App\Mods\DocsFile;
 use App\Mods\ModApiHandoff;
 use App\Mods\ModClassExtractor;
 use App\Mods\ModDataDiff;
+use App\Mods\ModEntries;
 use App\Mods\ModEnvironment;
 use App\Mods\ModReport;
 use App\Mods\ModSetResolver;
@@ -169,7 +171,15 @@ final class ModImportCommand extends Command
         $dump = $env->classExtractor->extract($env->installDir, "{$workDir}/dump", $mods,
             $docs->blueprintPackages(), $docs->blueprintClassNames(), ModClassExtractor::SINK_TABLES);
 
-        $builder = new DocsEntryBuilder($docs, NativeDefaults::infer($docs, (array) ($dump['base']['classes'] ?? [])), $classMap);
+        $adapters = new ModAdapters();
+        $adapterMap = [];
+        foreach ($sources as $source) {
+            foreach ($adapters->for($source)?->classMap() ?? [] as $class => $native) {
+                $adapterMap[self::classMapKey($class)] = ModEntries::nativePath($native);
+            }
+        }
+        $defaults = NativeDefaults::infer($docs, (array) ($dump['base']['classes'] ?? []));
+        $builder = new DocsEntryBuilder($docs, $defaults, array_merge($adapterMap, $classMap));
         $builder->addSinkTables((array) ($dump['base']['dataTables'] ?? []));
         $modDumps = [];
         foreach ($dump['mods'] as $modDump) {
@@ -192,19 +202,28 @@ final class ModImportCommand extends Command
             $built = $builder->build($ref);
             $report = $built['report'];
             $this->describe($report, $source, $modDumps[$ref] ?? []);
-            $entries[$ref] = $built['entries'];
             $reports[$ref] = $report;
 
             $context = [];
             foreach ($this->closure($ref, $sources) as $dependency) {
                 array_push($context, ...$entries[$dependency]);
             }
+
+            $adapters->describe($source, $report);
+            $adapter = $adapters->for($source);
+            if ($adapter !== null) {
+                $modEntries = new ModEntries($built['entries'], $context, $docs, $defaults);
+                $adapter->patchEntries($modEntries, $report);
+                $built['entries'] = $modEntries->all();
+            }
+            $entries[$ref] = $built['entries'];
             $contextKey = hash('sha256', json_encode($context, JSON_THROW_ON_ERROR));
             $without = $parsed[$contextKey] ??= $env->parse($docs->with($context), "{$workDir}/parse/{$ref}-base");
             $with = $env->parse($docs->with([...$context, ...$entries[$ref]]), "{$workDir}/parse/{$ref}");
 
             $diff = ModDataDiff::clean(ModDataDiff::diff($without, $with), $with, $report);
             $diff = ModDataDiff::restorePrecision($diff, $entries[$ref]);
+            $adapter?->patchData($diff, $report);
             ModDataDiff::summarize($diff, $report);
             $diffs[$ref] = $diff;
             $io->text(sprintf('%s: %s', $ref, $report->result === [] ? 'nothing to import'
@@ -361,11 +380,15 @@ final class ModImportCommand extends Command
             if (!preg_match('/^([A-Za-z0-9_\-.\/]+)=([A-Za-z0-9_.\/]+)$/', $pair, $m)) {
                 return "--class-map expects Class_C=FGNativeClass, got '{$pair}'.";
             }
-            // A C++ class may be given by its full script path.
-            $key = str_contains($m[1], '.') ? substr($m[1], strrpos($m[1], '.') + 1) : $m[1];
-            $map[$key] = str_starts_with($m[2], '/Script/') ? $m[2] : '/Script/FactoryGame.' . $m[2];
+            $map[self::classMapKey($m[1])] = ModEntries::nativePath($m[2]);
         }
 
         return $map;
+    }
+
+    /** A C++ class may be given by its full script path. */
+    private static function classMapKey(string $class): string
+    {
+        return str_contains($class, '.') ? substr($class, strrpos($class, '.') + 1) : $class;
     }
 }

@@ -219,6 +219,14 @@ files). `--class-map` replaces a guess: per blueprint (`Build_X_C=FGBuildableGen
 C++ class for every blueprint built on it (`FFPlotRecipe=FGRecipe`). Everything a run produced stays in
 `data/artifacts/mods/<time>-<mod>/` (`report.json`, `data/*.json`).
 
+Whatever the files cannot show can be written by hand in a mod adapter
+(`orchestrator/src/Mods/Adapters/`, registered in `ModAdapters`). An adapter is written for one mod
+version (`since()`) and used for it and every later version; older versions are imported without
+it. It can add class-map entries (`--class-map` still wins), change or add the mod's Docs entries
+before they are parsed (`patchEntries`, through `ModEntries`), and change the parsed data
+(`patchData`). The report names the adapter used. `FicsitFarmingAdapter` adds the Seed Extractor's
+recipes, which the mod picks in code.
+
 `mod:selftest` rebuilds every base-game class the same way and compares the parsed result with the
 parse of the real `Docs`; only vehicles (whose values live in vehicle classes the `Docs` do not list)
 and a few one-off base-game quirks should differ.

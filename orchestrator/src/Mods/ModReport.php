@@ -33,6 +33,9 @@ final class ModReport
     /** @var array<string,array{native:string,codeClass:?string}> class name => type guessed for a class built on the mod's code */
     public array $guessed = [];
 
+    /** The hand-written adapter used for this mod, if any. */
+    public ?string $adapter = null;
+
     /** @var array<string,int> category => new or changed entries in the result */
     public array $result = [];
 
@@ -80,6 +83,10 @@ final class ModReport
             $this->classes,
             $this->legacy ? " (old {$this->engine} files)" : '',
         )];
+
+        if ($this->adapter !== null) {
+            $lines[] = "  Adapter: {$this->adapter}";
+        }
 
         if ($this->result !== []) {
             $parts = [];
@@ -140,6 +147,7 @@ final class ModReport
             'skipped' => $this->skipped,
             'ignoredTypes' => $this->ignoredTypes,
             'guessed' => $this->guessed,
+            'adapter' => $this->adapter,
             'notes' => $this->notes,
         ];
     }
