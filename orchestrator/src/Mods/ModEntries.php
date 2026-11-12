@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Mods;
 
 /**
- * The Docs entries built for one mod, as a mod adapter sees and changes them. Classes of
- * the mod's dependencies and of the base game can be looked up but not changed.
+ * The Docs entries built for one mod, as ContentLib files and mod adapters see and change
+ * them. A change to a class of a dependency or the base game is kept as an override,
+ * which replaces that class when the mod is parsed.
  */
 final class ModEntries
 {
@@ -16,15 +17,20 @@ final class ModEntries
     /** @var array<string,array{native:string,entry:array<string,mixed>}> class name => dependency entry */
     private array $context = [];
 
+    /** @var array<string,array{native:string,entry:array<string,mixed>}> class name => changed class of a dependency or the game */
+    private array $overrides = [];
+
     /**
      * @param list<array{native:string,entry:array<string,mixed>}> $entries
      * @param list<array{native:string,entry:array<string,mixed>}> $context entries of the mod's dependencies
+     * @param array<string,array{native:string,entry:array<string,mixed>}> $overrides what the dependencies changed
      */
     public function __construct(
         array $entries,
         array $context,
         private readonly DocsFile $docs,
         private readonly NativeDefaults $defaults,
+        private readonly array $inheritedOverrides = [],
     ) {
         foreach ($entries as $entry) {
             $this->entries[(string) $entry['entry']['ClassName']] = $entry;
@@ -46,32 +52,44 @@ final class ModEntries
         return array_values($this->entries);
     }
 
+    /** @return array<string,array{native:string,entry:array<string,mixed>}> */
+    public function overrides(): array
+    {
+        return $this->overrides;
+    }
+
     public function has(string $className): bool
     {
-        return isset($this->entries[$className]);
+        return $this->find($className) !== null;
     }
 
     /**
-     * A class of the mod, a dependency or the base game.
+     * A class of the mod, a dependency or the game.
      * @return array<string,mixed>
      */
     public function get(string $className): array
     {
-        $found = $this->entries[$className] ?? $this->context[$className] ?? $this->docs->find($className);
-        if ($found === null) {
-            throw new \RuntimeException("{$className} is not in the mod, its dependencies or the game");
-        }
-
-        return $found['entry'];
+        return ($this->find($className) ?? throw new \RuntimeException("{$className} is not in the mod, its dependencies or the game"))['entry'];
     }
 
-    /** @param array<string,mixed> $entry */
+    public function native(string $className): string
+    {
+        return ($this->find($className) ?? throw new \RuntimeException("{$className} is not in the mod, its dependencies or the game"))['native'];
+    }
+
+    /**
+     * Changes a class; one that is not the mod's own is overridden.
+     * @param array<string,mixed> $entry
+     */
     public function set(string $className, array $entry): void
     {
-        if (!isset($this->entries[$className])) {
-            throw new \RuntimeException("{$className} is not a class of this mod");
+        if (isset($this->entries[$className])) {
+            $this->entries[$className]['entry'] = $entry;
+
+            return;
         }
-        $this->entries[$className]['entry'] = $entry;
+        $found = $this->find($className) ?? throw new \RuntimeException("{$className} is not in the mod, its dependencies or the game");
+        $this->overrides[$className] = ['native' => $found['native'], 'entry' => $entry];
     }
 
     /**
@@ -82,13 +100,13 @@ final class ModEntries
     {
         $native = self::nativePath($native);
         $className = (string) $entry['ClassName'];
-        if (isset($this->entries[$className]) || $this->docs->find($className) !== null) {
+        if ($this->has($className)) {
             throw new \RuntimeException("{$className} already exists");
         }
         $entry += [
             'FullName' => sprintf('BlueprintGeneratedClass %s/%s.%s', rtrim($package, '/'), preg_replace('/_C$/', '', $className), $className),
         ];
-        $this->entries[$className] = ['native' => $native, 'entry' => $entry + $this->defaults->forClass($native)];
+        $this->entries[$className] = ['native' => $native, 'entry' => $entry + $this->defaults($native)];
     }
 
     public function remove(string $className): void
@@ -96,57 +114,145 @@ final class ModEntries
         unset($this->entries[$className]);
     }
 
+    /** @return array<string,mixed> */
+    public function defaults(string $native): array
+    {
+        return $this->defaults->forClass(self::nativePath($native));
+    }
+
+    public function knowsNative(string $native): bool
+    {
+        return $this->defaults->has(self::nativePath($native));
+    }
+
+    /** @return array<string,true> the values the game uses for an enum key of a native class */
+    public function enumValues(string $native, string $key): array
+    {
+        return $this->docs->values(self::nativePath($native), $key);
+    }
+
+    /**
+     * The class a short name means, the way ContentLib resolves names: "_C" may be left out, a full path may be
+     * given, and the first class found wins whatever its type. Also finds classes the game only refers to, like
+     * BP_WorkBenchComponent_C.
+     */
+    public function resolve(string $name): ?string
+    {
+        $name = trim($name);
+        if (str_contains($name, '.')) {
+            $name = substr($name, strrpos($name, '.') + 1);
+        }
+        $name = rtrim($name, "'\"");
+        foreach (str_ends_with($name, '_C') ? [$name] : [$name . '_C', $name] as $candidate) {
+            if ($this->has($candidate) || $this->docs->classPath($candidate) !== null) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
     /** "/Mod/Path/X.X_C", as mProducedIn lists buildings */
     public function path(string $className): string
     {
-        $fullName = (string) ($this->get($className)['FullName'] ?? '');
-        $space = strpos($fullName, ' ');
-        if ($fullName === '' || $space === false) {
-            throw new \RuntimeException("{$className} has no class path");
+        $fullName = (string) ($this->find($className)['entry']['FullName'] ?? '');
+        if (str_contains($fullName, ' ')) {
+            return substr($fullName, strpos($fullName, ' ') + 1);
         }
 
-        return substr($fullName, $space + 1);
+        return $this->docs->classPath($className) ?? throw new \RuntimeException("{$className} has no class path");
     }
 
     /** "/Script/Engine.BlueprintGeneratedClass'/Mod/Path/X.X_C'", as ingredients and unlocks refer to classes */
     public function reference(string $className): string
     {
-        return "/Script/Engine.BlueprintGeneratedClass'{$this->path($className)}'";
+        $path = $this->path($className);
+
+        return str_starts_with($path, '/Script/')
+            ? "/Script/CoreUObject.Class'{$path}'"
+            : "/Script/Engine.BlueprintGeneratedClass'{$path}'";
     }
 
     /**
      * Docs amount list, e.g. ((ItemClass="…",Amount=1),(…)).
-     * @param array<string,int> $amounts item class name => amount
+     * @param array<string,int|float> $amounts item class name => amount
      */
     public function amounts(array $amounts): string
     {
         $parts = [];
         foreach ($amounts as $item => $amount) {
-            $parts[] = sprintf('(ItemClass="%s",Amount=%d)', $this->reference($item), $amount);
+            $parts[] = sprintf('(ItemClass="%s",Amount=%s)', $this->reference($item), self::number($amount));
         }
 
         return '(' . implode(',', $parts) . ')';
+    }
+
+    /**
+     * Docs reference list, e.g. ("…","…").
+     * @param list<string> $classNames
+     */
+    public function references(array $classNames): string
+    {
+        return '(' . implode(',', array_map(fn(string $class) => '"' . $this->reference($class) . '"', $classNames)) . ')';
+    }
+
+    /** Joins two Docs lists like "(a,b)" and "(c)" into "(a,b,c)". */
+    public static function joinLists(string $list, string $more): string
+    {
+        $list = trim($list);
+        $more = trim($more);
+        if ($list === '' || $list === '()') {
+            return $more;
+        }
+        if ($more === '' || $more === '()') {
+            return $list;
+        }
+
+        return substr($list, 0, -1) . ',' . substr($more, 1);
+    }
+
+    public static function number(int|float $value): string
+    {
+        return (float) $value === floor((float) $value) && abs((float) $value) < PHP_INT_MAX
+            ? (string) (int) $value
+            : rtrim(rtrim(sprintf('%.6f', $value), '0'), '.');
     }
 
     /** @param list<string> $recipes recipe class names the schematic unlocks in addition */
     public function unlockRecipes(string $schematic, array $recipes): void
     {
         $entry = $this->get($schematic);
-        $added = implode(',', array_map(fn(string $recipe) => '"' . $this->reference($recipe) . '"', $recipes));
-        $unlocks = \is_array($entry['mUnlocks'] ?? null) ? $entry['mUnlocks'] : [];
+        $entry['mUnlocks'] = self::addUnlock($entry['mUnlocks'] ?? [], 'BP_UnlockRecipe_C', 'mRecipes', $this->references($recipes));
+        $this->set($schematic, $entry);
+    }
+
+    /**
+     * Adds to the list of the unlock subobject of the given class, creating it when missing.
+     * @param mixed $unlocks the entry's mUnlocks
+     * @return list<array<string,mixed>>
+     */
+    public static function addUnlock(mixed $unlocks, string $class, string $key, string $list, bool $clear = false): array
+    {
+        $unlocks = \is_array($unlocks) ? array_values($unlocks) : [];
         foreach ($unlocks as &$unlock) {
-            if (($unlock['Class'] ?? '') === 'BP_UnlockRecipe_C') {
-                $list = trim((string) ($unlock['mRecipes'] ?? ''));
-                $unlock['mRecipes'] = $list === '' || $list === '()' ? "({$added})" : substr($list, 0, -1) . ",{$added})";
-                $added = null;
-                break;
+            if (($unlock['Class'] ?? '') === $class) {
+                $unlock[$key] = $clear ? $list : self::joinLists((string) ($unlock[$key] ?? ''), $list);
+
+                return $unlocks;
             }
         }
         unset($unlock);
-        if ($added !== null) {
-            $unlocks[] = ['Class' => 'BP_UnlockRecipe_C', 'mRecipes' => "({$added})"];
+        if ($list !== '' && $list !== '()') {
+            $unlocks[] = ['Class' => $class, $key => $list];
         }
-        $entry['mUnlocks'] = $unlocks;
-        $this->set($schematic, $entry);
+
+        return $unlocks;
+    }
+
+    /** @return array{native:string,entry:array<string,mixed>}|null */
+    private function find(string $className): ?array
+    {
+        return $this->entries[$className] ?? $this->overrides[$className] ?? $this->inheritedOverrides[$className]
+            ?? $this->context[$className] ?? $this->docs->find($className);
     }
 }

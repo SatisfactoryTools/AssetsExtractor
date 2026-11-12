@@ -13,6 +13,9 @@ final class DocsFile
     /** @var array<string,array{native:string,entry:array<string,mixed>}> */
     private array $byClass = [];
 
+    /** @var array<string,string>|null class name => class path, from every reference the file makes */
+    private ?array $paths = null;
+
     /** @var array<string,array<string,array<string,true>>>|null native => key => values */
     private ?array $values = null;
 
@@ -69,6 +72,30 @@ final class DocsFile
         }
 
         return $this->values[$native][$key] ?? [];
+    }
+
+    /**
+     * The path of a class ("/Game/.../Desc_X.Desc_X_C", "/Script/FactoryGame.FGBuildGun"). Most entries carry
+     * no FullName, but other entries refer to them by path.
+     */
+    public function classPath(string $className): ?string
+    {
+        if ($this->paths === null) {
+            $this->paths = [];
+            $json = json_encode($this->groups, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            preg_match_all('#(/(?:Game|Script)/[A-Za-z0-9_\-/]*)\.([A-Za-z0-9_\-]+)#', $json, $matches, PREG_SET_ORDER);
+            foreach ($matches as [, $package, $name]) {
+                $this->paths[$name] ??= "{$package}.{$name}";
+            }
+            foreach ($this->byClass as $name => $class) {
+                $fullName = (string) ($class['entry']['FullName'] ?? '');
+                if (str_contains($fullName, ' ')) {
+                    $this->paths[$name] = substr($fullName, strpos($fullName, ' ') + 1);
+                }
+            }
+        }
+
+        return $this->paths[$className] ?? null;
     }
 
     /** @return list<array{NativeClass:string,Classes:list<array<string,mixed>>}> */

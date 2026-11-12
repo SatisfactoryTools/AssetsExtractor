@@ -6,7 +6,7 @@ namespace App\Mods;
 
 /**
  * An unpacked .smod archive: the plugin descriptor plus the cooked paks (and, for mods
- * with their own code, the DLLs).
+ * with their own code, the DLLs) and/or ContentLib JSON files.
  */
 final class SmodPackage
 {
@@ -18,7 +18,7 @@ final class SmodPackage
         public readonly string $friendlyName,
         public readonly string $version,
         public readonly string $dir,
-        public readonly string $paksDir,
+        public readonly ?string $paksDir,
         public readonly bool $hasCode,
         public readonly array $dependencies,
     ) {
@@ -76,7 +76,10 @@ final class SmodPackage
 
         $paksDir = $dir . '/Content/Paks';
         if (!is_dir($paksDir)) {
-            throw new \RuntimeException("{$dir} has no Content/Paks folder — the mod ships no game content.");
+            if (!is_dir($dir . '/ContentLib')) {
+                throw new \RuntimeException("{$dir} has no Content/Paks or ContentLib folder — the mod ships no game content.");
+            }
+            $paksDir = null;
         }
 
         return new self(

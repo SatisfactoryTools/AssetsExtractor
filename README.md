@@ -49,7 +49,7 @@ data/             runtime working dir (git-ignored): downloads, artifacts, image
 ## Requirements
 
 - Linux, `steamcmd`, a Steam account that **owns Satisfactory** (the Docs + icon paks ship only with the game client, not the free dedicated server)
-- PHP 8.5 (`pdo_mysql`, `curl`, `iconv`) + Composer
+- PHP 8.5 (`pdo_mysql`, `curl`, `iconv`, `gd`) + Composer
 - .NET 10 SDK/runtime
 - MariaDB or equivalent
 - Ample disk (~30 GB per branch for the game install)
@@ -204,6 +204,14 @@ is the API's `modImport.ownerUuid`). Mods are private unless `--public` is given
 4. The base `Docs` is parsed with and without the mod's entries (dependencies are in both); what the
    mod adds or changes is the mod version's data. Recipes using unknown items are dropped, icons are
    published like a build's, and the data is handed to the API with links to the dependency versions.
+
+Mods made with [ContentLib](https://docs.ficsit.app/contentlib/latest/) ship JSON files in a `ContentLib/`
+folder (some have no paks at all), which ContentLib turns into content when the game starts. They are
+converted to Docs entries the way ContentLib reads them: new items, recipes and schematics (named after
+their file), `UnlockedBy` on recipes, visual kits (PNG icons from `ContentLib/Icons/` are scaled here,
+like extracted textures) and item/recipe/schematic patches, which change existing classes. A changed
+base-game or dependency class replaces that class when the mod is parsed, so it comes out in the mod's
+data. `CDOs/` files are reported, not imported.
 
 Classes built on a mod's own C++ classes have no readable parent: the paks store it only as a hash
 of `/Script/<Module>.<Class>`, which is matched against the identifiers in the mod DLLs to name it.

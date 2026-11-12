@@ -7,6 +7,9 @@ namespace App\Command;
 use App\Config;
 use App\Docs\ImageManifest;
 use App\Mods\Adapters\ModAdapters;
+use App\Mods\ContentLib\ContentLibConverter;
+use App\Mods\ContentLib\ContentLibFolder;
+use App\Mods\ContentLib\ContentLibIcons;
 use App\Mods\DocsEntryBuilder;
 use App\Mods\DocsFile;
 use App\Mods\ModApiHandoff;
@@ -167,7 +170,8 @@ final class ModImportCommand extends Command
     ): array {
         $io->section('Reading classes');
         $docs = DocsFile::load($env->docsFile);
-        $mods = array_values(array_map(static fn(ModSource $s) => ['reference' => $s->reference, 'paksDir' => $s->package->paksDir, 'binariesDir' => $s->package->dir . '/Binaries'], $sources));
+        $mods = array_values(array_map(static fn(ModSource $s) => ['reference' => $s->reference, 'paksDir' => $s->package->paksDir, 'binariesDir' => $s->package->dir . '/Binaries'],
+            array_filter($sources, static fn(ModSource $s) => $s->package->paksDir !== null)));
         $dump = $env->classExtractor->extract($env->installDir, "{$workDir}/dump", $mods,
             $docs->blueprintPackages(), $docs->blueprintClassNames(), ModClassExtractor::SINK_TABLES);
 
@@ -196,8 +200,11 @@ final class ModImportCommand extends Command
         $io->section('Comparing with the base game');
         $reports = [];
         $entries = [];
+        $overrides = [];
         $diffs = [];
         $parsed = [];
+        $contentLib = array_filter(array_map(static fn(ModSource $s) => ContentLibFolder::in($s->package->dir, $s->reference), $sources));
+        $icons = new ContentLibIcons();
         foreach ($sources as $ref => $source) {
             $built = $builder->build($ref);
             $report = $built['report'];
@@ -205,21 +212,32 @@ final class ModImportCommand extends Command
             $reports[$ref] = $report;
 
             $context = [];
+            $inherited = [];
+            $kitFolders = isset($contentLib[$ref]) ? [$contentLib[$ref]] : [];
             foreach ($this->closure($ref, $sources) as $dependency) {
                 array_push($context, ...$entries[$dependency]);
+                $inherited = array_replace($inherited, $overrides[$dependency]);
+                if (isset($contentLib[$dependency])) {
+                    $kitFolders[] = $contentLib[$dependency];
+                }
             }
 
+            $modEntries = new ModEntries($built['entries'], $context, $docs, $defaults, $inherited);
+            if (isset($contentLib[$ref])) {
+                (new ContentLibConverter($contentLib[$ref], $kitFolders, $modEntries, $report, $icons))->convert();
+            }
             $adapters->describe($source, $report);
             $adapter = $adapters->for($source);
-            if ($adapter !== null) {
-                $modEntries = new ModEntries($built['entries'], $context, $docs, $defaults);
-                $adapter->patchEntries($modEntries, $report);
-                $built['entries'] = $modEntries->all();
+            $adapter?->patchEntries($modEntries, $report);
+            $entries[$ref] = $modEntries->all();
+            $overrides[$ref] = $modEntries->overrides();
+            if ($overrides[$ref] !== []) {
+                $report->note(sprintf('it changes %d existing class(es): %s', \count($overrides[$ref]), implode(', ', array_keys($overrides[$ref]))));
             }
-            $entries[$ref] = $built['entries'];
-            $contextKey = hash('sha256', json_encode($context, JSON_THROW_ON_ERROR));
-            $without = $parsed[$contextKey] ??= $env->parse($docs->with($context), "{$workDir}/parse/{$ref}-base");
-            $with = $env->parse($docs->with([...$context, ...$entries[$ref]]), "{$workDir}/parse/{$ref}");
+
+            $contextKey = hash('sha256', json_encode([$context, $inherited], JSON_THROW_ON_ERROR));
+            $without = $parsed[$contextKey] ??= $env->parse(self::docsWith($docs, $context, $inherited), "{$workDir}/parse/{$ref}-base");
+            $with = $env->parse(self::docsWith($docs, [...$context, ...$entries[$ref]], array_replace($inherited, $overrides[$ref])), "{$workDir}/parse/{$ref}");
 
             $diff = ModDataDiff::clean(ModDataDiff::diff($without, $with), $with, $report);
             $diff = ModDataDiff::restorePrecision($diff, $entries[$ref]);
@@ -252,9 +270,21 @@ final class ModImportCommand extends Command
         if (!$dryRun && $union !== []) {
             $io->section('Icons');
             $imagesDir = "{$workDir}/images";
-            ImageManifest::write(array_values($union), "{$imagesDir}/image-manifest.json");
-            $result = $env->imageExtractor->extract("{$imagesDir}/image-manifest.json", $env->installDir, $imagesDir, null,
-                $env->engineCandidates, array_values(array_map(static fn(ModSource $s) => $s->package->paksDir, $sources)));
+            $textures = array_values(array_filter($union, static fn(array $entry) => !$icons->has($entry['assetPath'])));
+            $pngs = array_values(array_filter(array_keys($union), static fn(string $path) => $icons->has($path)));
+            $result = ['assets' => [], 'failed' => 0, 'total' => 0];
+            if ($textures !== []) {
+                ImageManifest::write($textures, "{$imagesDir}/image-manifest.json");
+                $result = $env->imageExtractor->extract("{$imagesDir}/image-manifest.json", $env->installDir, $imagesDir, null,
+                    $env->engineCandidates, array_values(array_filter(array_map(static fn(ModSource $s) => $s->package->paksDir, $sources))));
+            }
+            if ($pngs !== []) {
+                $sizes = array_map('intval', explode(',', (string) $this->config->get('extraction.sizes', '256,64')));
+                $rendered = $icons->render($pngs, $imagesDir, $sizes);
+                $result['assets'] = [...$result['assets'], ...$rendered];
+                $result['total'] += \count($rendered);
+                $result['failed'] += \count(array_filter($rendered, static fn(array $asset) => !$asset['ok']));
+            }
             if ($result['failed'] > 0) {
                 $io->warning(sprintf('%d of %d icons could not be read; those entries get no icon.', $result['failed'], $result['total']));
             }
@@ -301,8 +331,8 @@ final class ModImportCommand extends Command
         if ($overrides !== []) {
             $report->note(sprintf('it replaces %d base-game file(s); those changes are not imported', \count($overrides)));
         }
-        if (\in_array('ContentLib', $source->dependencies, true)) {
-            $report->note('it uses ContentLib, which can add or change content while the game runs; that part is not imported');
+        if (\in_array('ContentLib', $source->dependencies, true) && ContentLibFolder::in($source->package->dir, $source->reference) === null) {
+            $report->note('it uses ContentLib but ships no ContentLib folder; content it makes from code while the game runs is not imported');
         }
         foreach ((array) ($modDump['failedPackages'] ?? []) as $failed) {
             $report->note("could not read {$failed['path']}: {$failed['error']}");
@@ -384,6 +414,24 @@ final class ModImportCommand extends Command
         }
 
         return $map;
+    }
+
+    /**
+     * The Docs with extra classes, where overrides replace the classes they change: a dependency's class in the
+     * extra list, or a base-game class.
+     * @param list<array{native:string,entry:array<string,mixed>}> $extra
+     * @param array<string,array{native:string,entry:array<string,mixed>}> $overrides
+     */
+    private static function docsWith(DocsFile $docs, array $extra, array $overrides): DocsFile
+    {
+        foreach ($extra as &$class) {
+            $class = $overrides[(string) $class['entry']['ClassName']] ?? $class;
+        }
+        unset($class);
+        $listed = array_flip(array_map(static fn(array $class) => (string) $class['entry']['ClassName'], $extra));
+        $base = array_map(static fn(array $override) => $override['entry'], array_diff_key($overrides, $listed));
+
+        return ($base === [] ? $docs : $docs->replacing($base))->with($extra);
     }
 
     /** A C++ class may be given by its full script path. */
