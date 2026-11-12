@@ -69,7 +69,12 @@ cd extractor-net && dotnet build -c Release && cd ..
 
 # .NET world extractor (resource nodes, collectibles, map tiles)
 cd world-extractor-net && dotnet build -c Release && cd ..
+
+# .NET mod class extractor (mod:import)
+cd mod-extractor-net && dotnet build -c Release && cd ..
 ```
+
+The .NET tools are not rebuilt by `git pull`; rebuild them after every update that touches them.
 
 **2. Create the database + user** (MariaDB/MySQL)
 

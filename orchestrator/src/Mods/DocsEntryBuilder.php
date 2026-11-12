@@ -118,6 +118,7 @@ final class DocsEntryBuilder
     {
         $report = new ModReport($reference);
         $candidates = [];
+        $skipped = [];
         foreach ($this->classes as $path => $class) {
             if ($this->owners[$path] !== $reference) {
                 continue;
@@ -130,6 +131,7 @@ final class DocsEntryBuilder
                 if ($contentLike) {
                     $report->skip($class['className'], $resolved);
                 }
+                $skipped[$class['className']] = true;
                 continue;
             }
             if (!$this->defaults->has($resolved['native'])) {
@@ -142,6 +144,7 @@ final class DocsEntryBuilder
             $invalid = $this->invalidEnum($resolved);
             if ($invalid !== null) {
                 $report->skip($class['className'], $invalid);
+                $skipped[$class['className']] = true;
                 continue;
             }
             if (isset($this->emitted[$class['className']]) || (!$this->replaceExisting && $this->docs->find($class['className']) !== null)) {
@@ -149,7 +152,7 @@ final class DocsEntryBuilder
                 continue;
             }
             $this->emitted[$class['className']] = true;
-            $candidates[] = $resolved;
+            $candidates[] = $resolved + ['fromMod' => !str_starts_with($path, '/Game/')];
         }
 
         $this->renameBuildings($candidates, $report);
@@ -157,9 +160,11 @@ final class DocsEntryBuilder
             $candidate['entry'] = $this->applyRenames($candidate['entry']);
         }
         unset($candidate);
+        $this->dropOrphanDescriptors($candidates, $skipped, $report);
         $this->nameDescriptors($candidates);
 
         $entries = [];
+        $unnamed = [];
         foreach ($candidates as $resolved) {
             $entry = $resolved['entry'];
             if (array_intersect(self::FUEL_KEYS, $resolved['own']) !== [] && \array_key_exists('mFuel', $entry)) {
@@ -167,6 +172,11 @@ final class DocsEntryBuilder
             }
             if (str_ends_with($resolved['native'], 'Recipe') && ($entry['mDisplayNameOverride'] ?? 'False') !== 'True') {
                 $entry['mDisplayName'] = $this->productName($entry, $candidates) ?? ($entry['mDisplayName'] ?? '');
+            }
+            // DocsParser drops nameless schematics as discontinued, and every recipe only they unlock with them.
+            if (($resolved['fromMod'] ?? false) && str_ends_with($resolved['native'], 'Schematic') && trim((string) ($entry['mDisplayName'] ?? '')) === '') {
+                $entry['mDisplayName'] = self::readableName($resolved['className']);
+                $unnamed[] = $resolved['className'];
             }
             if (isset($this->sinkPoints[$resolved['className']]) && \array_key_exists('mResourceSinkPoints', $entry)) {
                 $entry['mResourceSinkPoints'] = $this->sinkPoints[$resolved['className']];
@@ -179,7 +189,19 @@ final class DocsEntryBuilder
             $report->count($resolved['native']);
         }
 
+        if ($unnamed !== []) {
+            $report->note(sprintf('%d schematic(s) have no name (%s); they are named after their class. Mods often grant such schematics in code, depending on settings, so their recipes may not all be available together in the game',
+                \count($unnamed), implode(', ', $unnamed)));
+        }
+
         return ['entries' => $entries, 'report' => $report];
+    }
+
+    private static function readableName(string $className): string
+    {
+        $name = (string) preg_replace(['/^(Schematic|Schem)_/', '/_C$/'], '', $className);
+
+        return trim((string) preg_replace('/[_\-]+/', ' ', $name));
     }
 
     /** @return array{native:string,entry:array<string,mixed>,own:list<string>}|string */
@@ -373,6 +395,28 @@ final class DocsEntryBuilder
      * The game names a building descriptor after the building it places.
      * @param list<array{entry:array<string,mixed>,className:string}> $candidates
      */
+    /**
+     * A descriptor takes its name and every building value from its buildable, so without it the planner would get a nameless, empty building.
+     * @param list<array{entry:array<string,mixed>,className:string}> $candidates
+     * @param array<string,true> $skipped
+     */
+    private function dropOrphanDescriptors(array &$candidates, array $skipped, ModReport $report): void
+    {
+        $candidates = array_values(array_filter($candidates, function (array $candidate) use ($skipped, $report): bool {
+            $buildable = $candidate['entry']['mBuildableClass'] ?? $candidate['entry']['mVehicleClass'] ?? null;
+            if (!\is_string($buildable) || $buildable === '' || $buildable === 'None') {
+                return true;
+            }
+            $buildableName = self::className($buildable);
+            if (!isset($skipped[$buildableName]) || $this->docs->find($buildableName) !== null) {
+                return true;
+            }
+            $report->skip($candidate['className'], "its building {$buildableName} was skipped");
+
+            return false;
+        }));
+    }
+
     private function nameDescriptors(array &$candidates): void
     {
         foreach ($candidates as $i => $candidate) {
