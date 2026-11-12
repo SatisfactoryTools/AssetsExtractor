@@ -31,6 +31,7 @@ Three cooperating components, decoupled by a CLI + JSON/file contract:
 | `orchestrator/`  | PHP 8.5 (Symfony Console)                   | The pipeline: version check, download, docs diff, publish, state, scheduling, notifications. Shells out to the other two. |
 | `extractor-net/` | .NET 10 + CUE4Parse + SkiaSharp             | Decodes UE5 textures and writes normalized PNGs + per-asset content hashes.                                               |
 | docs parser      | `satisfactory-tools/docs-parser` (Composer) | Parses the game `Docs` into structured data. Driven as a console command.                                                 |
+| `mod-extractor-net/` | .NET 10 + CUE4Parse                     | Reads the blueprint classes of mods (and base-game classes) and writes their values the way the `Docs` file does.        |
 
 The heavy lifting that *must* be .NET (CUE4Parse) is isolated in `extractor-net/`; everything else is PHP.
 
@@ -40,6 +41,7 @@ The heavy lifting that *must* be .NET (CUE4Parse) is isolated in `extractor-net/
 orchestrator/     PHP orchestrator (bin/extractor, src/, config/)
 extractor-net/    .NET image extractor (Program.cs, Extractor.csproj)
 world-extractor-net/  .NET world extractor: resource nodes, collectibles, map tiles
+mod-extractor-net/    .NET mod class extractor, used by mod:import
 systemd/          systemd units
 data/             runtime working dir (git-ignored): downloads, artifacts, images
 ```
@@ -168,6 +170,46 @@ systemctl list-timers 'sf-extractor@*'           # next scheduled run
 ```
 
 Failures are written to `notifications.log_file` and (if configured) a Discord webhook.
+
+## Importing mods
+
+```bash
+php orchestrator/bin/extractor mod:import Easy_Recipes                  # latest release from ficsit.app
+php orchestrator/bin/extractor mod:import Easy_Recipes --mod-version 1.4.4 --public
+php orchestrator/bin/extractor mod:import --file Easy_Recipes.smod      # a local .smod file
+php orchestrator/bin/extractor mod:import RefinedPower --dry-run        # only write data files + report
+php orchestrator/bin/extractor mod:selftest                             # check the converter against the base game
+```
+
+`mod:import` reads a content mod (and every mod it needs) against a branch's install and stores
+it as an SFTools mod version through the API (`mods.command`, the API's `mods:import`; the owner
+is the API's `modImport.ownerUuid`). Mods are private unless `--public` is given.
+
+1. The mod and its required dependencies (except SML) are resolved on ficsit.app
+   (`api.ficsit.app/v2/query`, no account needed) and their Windows `.smod` files downloaded to
+   `data/mods/downloads/`. `--with <file.smod>` supplies a dependency from disk.
+2. `mod-extractor-net` dumps every blueprint class of the mods with the values its class default
+   object sets. Old mods (legacy `.pak`, e.g. UE 5.3) are read with their own engine version.
+3. A class default object only stores what differs from its parent, so each class is laid over its
+   parent: a base-game class's `Docs` entry, another mod class, or the C++ defaults. The C++
+   defaults are not in the paks; they are inferred by comparing base-game blueprints with their
+   `Docs` entries. Recipe and descriptor names, generator fuels and sink points are derived the way
+   the game derives them. Buildings named differently from their descriptor are renamed so the
+   parser pairs them.
+4. The base `Docs` is parsed with and without the mod's entries (dependencies are in both); what the
+   mod adds or changes is the mod version's data. Recipes using unknown items are dropped, icons are
+   published like a build's, and the data is handed to the API with links to the dependency versions.
+
+The report lists, per mod, whether it ships code (DLLs) or is blueprint-only, what was imported,
+which classes were left out and why (most often: they extend the mod's own C++ classes), types
+SFTools does not read, and content the files cannot show (ContentLib, conditional schematics,
+replaced base-game files). `--class-map Build_X_C=FGBuildableGeneratorFuel` imports a class that
+extends mod code as a standard game type. Everything a run produced stays in
+`data/artifacts/mods/<time>-<mod>/` (`report.json`, `data/*.json`).
+
+`mod:selftest` rebuilds every base-game class the same way and compares the parsed result with the
+parse of the real `Docs`; only vehicles (whose values live in vehicle classes the `Docs` do not list)
+and a few one-off base-game quirks should differ.
 
 ## License
 

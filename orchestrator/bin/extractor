@@ -5,6 +5,8 @@ declare(strict_types=1);
 
 use App\Command\CheckCommand;
 use App\Command\MigrateCommand;
+use App\Command\ModImportCommand;
+use App\Command\ModSelfTestCommand;
 use App\Command\RunCommand;
 use App\Command\WorldCommand;
 use App\Config;
@@ -19,4 +21,6 @@ $app->addCommand(new CheckCommand($config));
 $app->addCommand(new RunCommand($config));
 $app->addCommand(new MigrateCommand($config));
 $app->addCommand(new WorldCommand($config));
+$app->addCommand(new ModImportCommand($config));
+$app->addCommand(new ModSelfTestCommand($config));
 $app->run();

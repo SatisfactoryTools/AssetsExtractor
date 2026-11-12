@@ -43,6 +43,8 @@ extraction:
     # The .NET world extractor (world-extractor-net): resource nodes, collectibles and the
     # map tiles. Optional - when missing or failing, a build is published without a map.
     world_dll: /path/to/assets-extractor/world-extractor-net/bin/Release/net10.0/WorldExtractor.dll
+    # The .NET mod class extractor (mod-extractor-net), used by `mod:import`.
+    mod_dll: /path/to/assets-extractor/mod-extractor-net/bin/Release/net10.0/ModExtractor.dll
     sizes: "256,64"
     # Ordered auto-detect candidates (first that parses a known asset wins).
     engine_candidates: [ GAME_UE5_6, GAME_UE5_5, GAME_UE5_4, GAME_UE5_3 ]
@@ -67,6 +69,15 @@ publish:
     # --summary-file <file>). It decides whether the build joins the current SFTools version (only
     # cosmetic changes) or starts a new one; the decision is included in notifications. Empty = skip.
     command: ""
+
+mods:
+    # API command that stores an imported mod (invoked as: <command> --data <file> --reference <ref>
+    # --name <name> --mod-version <version> [--source-version <id>] [--public] [--depends-on <id>]...
+    # --summary-file <file>). The owner is the API's modImport.ownerUuid. Empty = `mod:import` only
+    # writes the data files (like --dry-run).
+    command: ""
+    # e.g. command: /var/www/sftools3/tools-api/bin/console mods:import
+    smr_url: https://api.ficsit.app
 
 notifications:
     log_file: /path/to/assets-extractor/data/logs/notifications.log

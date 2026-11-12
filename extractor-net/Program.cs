@@ -17,7 +17,7 @@ using SkiaSharp;
 // Usage:
 //   Extractor --manifest <image-manifest.json> --install-dir <game install> --out <dir>
 //             [--engine GAME_UE5_6] [--engine-candidates GAME_UE5_6,GAME_UE5_5,...]
-//             [--aes-key 0x...] [--sizes 256,64]
+//             [--aes-key 0x...] [--sizes 256,64] [--extra-paks <dir>;<dir>...]
 
 var opts = Args.Parse(args);
 string manifestPath = opts.Require("manifest");
@@ -27,6 +27,7 @@ int[] sizes = (opts.Get("sizes") ?? "256,64").Split(',', StringSplitOptions.Remo
     .Select(s => int.Parse(s.Trim())).ToArray();
 
 string paksDir = Path.Combine(installDir, "FactoryGame", "Content", "Paks");
+string[] extraPaks = (opts.Get("extra-paks") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 string usmap = Path.Combine(installDir, "CommunityResources", "FactoryGame.usmap");
 
 string engineList = opts.Get("engine") ?? opts.Get("engine-candidates")
@@ -55,7 +56,7 @@ foreach (var size in sizes)
     Directory.CreateDirectory(Path.Combine(outDir, size.ToString()));
 
 // --- pick the engine version that actually parses this build ---
-var provider = OpenProvider(paksDir, usmap, aesKey, candidates, manifest, out var engine);
+var provider = OpenProvider(paksDir, extraPaks, usmap, aesKey, candidates, manifest, out var engine);
 Console.WriteLine($"Engine: {engine} | mounted files: {provider.Files.Count}");
 
 var results = new List<AssetResult>(manifest.Count);
@@ -64,7 +65,7 @@ foreach (var entry in manifest)
 {
     try
     {
-        var texture = provider.LoadPackageObject<UTexture2D>(entry.AssetPath);
+        var texture = provider.LoadPackageObject<UTexture2D>(ModPaths.Resolve(provider, entry.AssetPath));
         using var bitmap = (texture.Decode() ?? throw new Exception("Decode() returned null")).ToSkBitmap();
 
         var outputs = new Dictionary<string, SizeResult>();
@@ -99,7 +100,7 @@ return failed > 0 && ok == 0 ? 1 : 0;
 // ---- helpers ----
 
 static IFileProvider OpenProvider(
-    string paksDir, string usmap, byte[] aesKey, EGame[] candidates,
+    string paksDir, string[] extraPaks, string usmap, byte[] aesKey, EGame[] candidates,
     List<ManifestEntry> manifest, out EGame chosen)
 {
     // The shipped .usmap is optional for texture extraction: newer builds ship a
@@ -125,13 +126,13 @@ static IFileProvider OpenProvider(
             // Case-insensitive path lookup: docs sometimes reference a texture with
             // different casing than the pak path (e.g. ".../Mam/UI" vs ".../MAM/UI").
             var provider = new DefaultFileProvider(
-                paksDir, SearchOption.AllDirectories, new VersionContainer(game),
-                StringComparer.OrdinalIgnoreCase);
+                new DirectoryInfo(paksDir), extraPaks.Select(d => new DirectoryInfo(d)).ToArray(),
+                SearchOption.AllDirectories, new VersionContainer(game), StringComparer.OrdinalIgnoreCase);
             if (mappings != null) provider.MappingsContainer = mappings;
             provider.Initialize();
             provider.SubmitKey(new FGuid(), new FAesKey(aesKey));
             // Verify by fully decoding the first asset with this engine version.
-            var tex = provider.LoadPackageObject<UTexture2D>(probe);
+            var tex = provider.LoadPackageObject<UTexture2D>(ModPaths.Resolve(provider, probe));
             _ = (tex.Decode() ?? throw new Exception("probe decode null")).ToSkBitmap();
             chosen = game;
             return provider;
@@ -159,6 +160,24 @@ static byte[] ParseAesKey(string? key)
     if (string.IsNullOrWhiteSpace(key)) return new byte[32];
     key = key.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? key[2..] : key;
     return Convert.FromHexString(key);
+}
+
+// Mod content is mounted as /<Mod>/..., which CUE4Parse does not map to the mod's files.
+static class ModPaths
+{
+    public static string Resolve(IFileProvider provider, string assetPath)
+    {
+        if (!assetPath.StartsWith('/') || assetPath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)) return assetPath;
+        var slash = assetPath.IndexOf('/', 1);
+        if (slash < 0) return assetPath;
+        string mount = assetPath[1..slash], rest = assetPath[(slash + 1)..];
+        string package = rest.Contains('.') ? rest[..rest.LastIndexOf('.')] : rest;
+        foreach (var root in new[] { $"FactoryGame/Mods/{mount}/Content/", $"FactoryGame/Mods/GameFeatures/{mount}/Content/" })
+        {
+            if (provider.Files.ContainsKey(root + package + ".uasset")) return root + rest;
+        }
+        return assetPath;
+    }
 }
 
 // ---- types ----

@@ -31,6 +31,7 @@ final class ImageExtractor
      *        tries them in order and picks the first that parses the paks. Pass the
      *        engine read from the game's version file first to "pin" it, keeping the
      *        configured candidates as fallback. Null uses the configured list.
+     * @param list<string> $extraPaks mod paks directories mounted next to the game's
      * @return array{total:int,ok:int,failed:int,engine:string,resultPath:string,assets:array<int,mixed>}
      */
     public function extract(
@@ -39,6 +40,7 @@ final class ImageExtractor
         string $outDir,
         ?callable $onProgress = null,
         ?array $engineCandidates = null,
+        array $extraPaks = [],
     ): array {
         if (!is_file($this->dll)) {
             throw new \RuntimeException("Extractor DLL not found: {$this->dll} — build extractor-net (dotnet build -c Release).");
@@ -52,6 +54,10 @@ final class ImageExtractor
             '--sizes', $this->sizes,
             '--engine-candidates', implode(',', $engineCandidates ?? $this->engineCandidates),
         ];
+        if ($extraPaks !== []) {
+            $args[] = '--extra-paks';
+            $args[] = implode(';', $extraPaks);
+        }
         if ($this->aesKey !== '') {
             $args[] = '--aes-key';
             $args[] = $this->aesKey;
